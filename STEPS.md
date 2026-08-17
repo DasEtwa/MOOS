@@ -49,6 +49,10 @@ repository checkout.
 
 ## Phase 1 — Stable minimal MOOS
 
+Status: the current x86_64 baseline has a passing automated boot/login/network/
+filesystem/reboot/poweroff smoke test. The development-only blank root password
+remains intentionally open until a release authentication model exists.
+
 ### Goal
 
 Make boot, init, shell, networking, filesystem behavior, shutdown, and login

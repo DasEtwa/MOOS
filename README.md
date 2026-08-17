@@ -31,6 +31,7 @@ streaming are not implemented yet. Their interfaces must remain replaceable.
 | configs/ | Tracked Buildroot configuration used for the MOOS QEMU image |
 | scripts/build.sh | Fetches the pinned Buildroot revision and builds MOOS |
 | scripts/run-qemu.sh | Portable QEMU launcher for the generated image |
+| tests/qemu_smoke.py | Host-side boot, login, network, and shutdown smoke test |
 | system/overlay/ | Files copied into the guest root filesystem |
 | AGENTS.md | Development rules for coding agents |
 | BUG_AUDIT.md | Evidence-based baseline audit |
@@ -76,7 +77,7 @@ For the console view and login banner:
 ./scripts/run-qemu.sh --serial-only
 ~~~
 
-Wait for buildroot login:, enter root, and leave the password empty. This
+Wait for moos login:, enter root, and leave the password empty. This
 blank-password root account is intentional for the current local development
 image only; the image must not be exposed as a remote service.
 
@@ -88,6 +89,19 @@ terminal:
 ~~~
 
 Stop the serial-only session with Ctrl+A, then X.
+
+## Phase 1 smoke test
+
+After building, run the standard host-side smoke test:
+
+~~~bash
+python3 tests/qemu_smoke.py
+~~~
+
+The test boots QEMU through the tracked launcher, waits for the login prompt,
+checks the banner, kernel, BusyBox, RAM, uptime, /proc, /sys, DHCP, rootfs
+space, and writable /tmp, then requests a guest poweroff and verifies that QEMU
+exits.
 
 ## Guest customization
 
