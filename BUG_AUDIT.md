@@ -199,20 +199,21 @@ clear in future size reports.
 
 Severity: Future Risk
 Component: remote architecture
-Category: Not implemented
-Status: Not an active bug
+Category: Remote boundary
+Status: Local control implemented; remote exposure remains prohibited
 
 ### Finding
 
-No moosd, remote protocol, Tailscale integration, host control API, mobile
-client, or streaming layer exists in the current repository.
+The repository now has a local Unix-socket `moosd` with fixed Personal
+status/start/stop/terminal operations. It does not have remote application
+authentication, Tailscale integration, a mobile client, or streaming.
 
 ### Significance
 
-These are planned capabilities, not defects in the current minimal image.
-When work begins, keep host control separate from guest control, authenticate
-and authorize every operation, encrypt transport, and avoid arbitrary host root
-execution.
+The local daemon is not a remote endpoint. Host control remains separate from
+guest serial input, arbitrary host execution is absent, and the socket is
+restricted to a dedicated local group. Any later remote boundary must
+authenticate and authorize every operation and encrypt transport.
 
 ## MOOS-0009
 
@@ -288,6 +289,69 @@ Instance must not be treated as protected by these controls until the setup is
 reviewed, activated, and checked with `systemctl status` and cgroup inspection
 on the target host.
 
+## MOOS-0012
+
+Severity: High
+Component: M5 local control and terminal bridge
+Category: Reliability and control-plane boundary
+Status: Resolved and verified, including privileged managed acceptance
+
+### Findings and fixes
+
+The original M5 implementation assumed one `recv()` was one JSON message. This
+lost fragmented frames, merged concatenated frames, and could merge the
+terminal acknowledgment with first output. `FrameDecoder` now incrementally
+parses newline-delimited object frames, preserves partial data, returns every
+complete frame, limits encoded frames to 16 KiB, and reports malformed,
+non-object, truncated, and oversized input without killing `moosd`.
+
+Terminal dispatch previously called `.get()` on any decoded JSON value, so
+arrays, strings, numbers, and null could raise `AttributeError`. Object type
+validation now occurs before business dispatch for request and terminal
+frames. Per-client handlers also contain unexpected failures.
+
+The old console was a PTY master stored only in the daemon process. QEMU now
+owns a fixed server-mode Unix serial socket in its systemd-managed private
+runtime directory. Each terminal session opens a fresh connection, and QEMU
+continues when a client or daemon disconnects. No VM restart is used for
+recovery.
+
+The daemon previously discarded a long-lived `Popen` launcher and could miss
+startup failure. `run-instance.sh` now hands QEMU directly to a transient
+`systemd-run --service-type=exec` unit without `--pty` or `--wait`; the daemon
+uses synchronous `subprocess.run`, reaps the launcher, checks its return code,
+checks systemd state, and waits for the console endpoint. Stop retains the
+console when systemctl fails and checks state only after successful stop.
+
+Status previously inspected only `ActiveState` and treated every systemctl
+error as stopped. It now combines `LoadState`, `ActiveState`, `SubState`, and
+`Result` into starting, running, stopping, stopped, failed, or unknown. Manager
+errors are unknown and block a risky duplicate start.
+
+The repository now defines a socket-activated root broker with a dedicated
+`moos-control` client group, mode-0660 local socket, systemd-owned runtime
+directory, restart-on-failure, journald logging, and service hardening. Root is
+retained only for the fixed systemd lifecycle handoff. No sudo policy,
+arbitrary command, host path, QEMU argument, or remote listener is exposed.
+
+### Verification
+
+Regression tests cover fragmented and concatenated requests, fragmented and
+combined responses, all invalid JSON value types, malformed and oversized
+JSON, fragmented terminal frames, disconnect/reconnect, startup failure,
+failed stop, structured status, and a new runtime object reconnecting to the
+same console. `tests/qemu_terminal_bridge.py` booted the real image, ran
+`moos-info` through the bridge, terminated and reaped the daemon while QEMU
+remained alive, then reconnected through a new daemon and ran `moos-info`
+again.
+
+The administrator-executed `tests/managed_personal.py` final acceptance test
+passed on 2026-08-17. It started the real systemd-managed Personal guest,
+reached its login, ran `moos-info` through the framed terminal, restarted and
+reaped `moosd` while the guest stayed active, reconnected the terminal, then
+stopped Personal and reaped the managed processes. The unit ended absent and
+inactive with `Result=success`. The M5 High findings are resolved.
+
 ## Area checklist
 
 | Area | Audit result |
@@ -297,12 +361,12 @@ on the target host.
 | QEMU startup | Boot verified; generated launcher had an absolute path and is replaced by a portable wrapper. |
 | Filesystem permissions | Generated target files are build intermediates owned by the host until fakeroot image creation; final image creation was verified. |
 | Init | BusyBox init and Buildroot init scripts run; serial and tty1 gettys are intentional. |
-| Networking | Default is disabled; explicit QEMU user networking plus DHCP works; no remote service exists. |
+| Networking | Default is disabled; explicit QEMU user networking plus DHCP works; local moosd is not a remote service. |
 | Shell/login | Root login and dynamic banner work; blank root password is unsafe outside development. |
 | Hard-coded paths | Generated launcher/config contained a developer path; tracked scripts avoid it. |
 | Generated artifacts | buildroot/, output/, and host tools are large generated/local state and must stay ignored. |
 | Temporary files | Buildroot creates temporary files under its ignored output/build trees; no tracked temporary file was found. |
-| Host/guest boundaries | Rootless QEMU sandbox and one real Phase 3.1 runtime activation verified; host IPC remains future work. |
+| Host/guest boundaries | Rootless QEMU sandbox and one real Phase 3.1 activation verified; M5 adds only a fixed local serial socket and typed local broker. |
 | Secret exposure | No secret or credential was found; the empty root password is an insecure configuration, not a leaked secret. |
 | Developer-machine assumptions | Original launcher and generated config depended on the original absolute checkout path; portable scripts remove that dependency. |
 

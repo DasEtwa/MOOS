@@ -1,9 +1,9 @@
 # MOOS host/guest isolation
 
-This document describes the current Phase 3 boundary between the MOOS host
-launcher and a MOOS guest Instance. It is intentionally explicit about what is
-already enforced, what the Phase 3.1 setup path enforces after activation, and
-what still needs a dedicated host runtime design.
+This document describes the current Phase 3/M5 boundary between the MOOS host
+control plane and a MOOS guest Instance. It is intentionally explicit about
+what is already enforced, what privileged setup activates, and what remains
+unsafe for remote exposure.
 
 ## Current default boundary
 
@@ -72,6 +72,20 @@ by `moos-runtime`; the QEMU binary, libraries, and firmware under
 IDs are never replaced implicitly. The source image remains outside the runtime
 account's normal path.
 
+M5 does not move QEMU into `moosd`. The transient instance service remains the
+QEMU owner. It creates one private runtime directory and QEMU listens on a
+fixed serial socket inside it:
+
+~~~text
+/run/moos-instances/personal/console.sock
+~~~
+
+Only that directory is writable inside the QEMU Bubblewrap sandbox. It does
+not expose arbitrary `/run` paths. The socket path is fixed by the managed
+runner, validated by the launcher, omitted from client responses, and removed
+with the transient unit. QEMU server-mode serial accepts a later connection,
+so disconnecting a client or restarting `moosd` does not stop the guest.
+
 Run the managed path with:
 
 ~~~bash
@@ -133,6 +147,15 @@ The deliberate Phase 3.1 test on 2026-08-17 produced these observations:
 - `/home` and `/dev/kvm` were hidden from the Guest, and the Guest process list
   contained Guest kernel/userspace processes only.
 
+The final M5 managed integration test on the same date additionally verified:
+
+- the real `personal` transient unit started QEMU and reached the MOOS login;
+- `moos-info` completed through the bounded local terminal bridge;
+- terminating and reaping `moosd` did not stop the managed guest;
+- a new daemon reconnected to the existing QEMU serial socket and terminal;
+- managed stop succeeded, processes were reaped, and the unit ended inactive
+  with `Result=success`.
+
 `/root`, `/run`, and a possible `/dev/dri` entry in the Guest are not host
 paths: they belong to the Guest filesystem or its emulated QEMU graphics
 device. The test does not claim that the future host API, shared folders, or
@@ -160,21 +183,44 @@ decide whether a particular Instance receives it.
 
 ## Host/guest channel
 
-The only current host-to-guest interaction channel is the local serial console.
-It is an interactive development channel, not a remote API. The QEMU monitor is
-disabled in the launcher, and there is no host socket, shared folder, guest
-agent, or `moosd` channel yet.
-
-The future shape is:
+The only host-to-guest interaction channel is still the guest serial console.
+The managed path now makes that channel reconnectable and bridges it through a
+local typed `moosd` operation:
 
 ~~~text
-client → authenticated moosd on the host → narrow Instance operation
-                                      ↘ serial/IPC channel → guest
+local moos-control client → /run/moos/moosd.sock → typed Personal operation
+                                                    ↘ fixed QEMU serial socket
 ~~~
 
-The guest must never turn that channel into arbitrary host command execution.
-Host operations need explicit, typed, authenticated, validated, and revocable
-interfaces.
+The client hop uses bounded incremental newline-delimited JSON framing.
+Fragmented frames, several frames in one read, malformed JSON,
+non-object JSON values, and oversized frames are handled without terminating
+the daemon. Terminal input is written only to the QEMU serial socket. There is
+no `/exec` operation, arbitrary host command, host path, QEMU argument, shared
+folder, guest agent, or QEMU monitor in this interface.
+
+`moosd.socket` is owned by `root:moos-control` with mode 0660. The service uses
+socket activation, restart-on-failure, journald logging, read-only system
+paths, no-new-privileges, and an empty capability bounding set. It retains UID
+0 because the existing fixed runner must ask the system systemd manager to
+create and stop the unprivileged instance service. Membership in
+`moos-control` grants only the typed local Personal API and guest console; no
+sudo rule is installed. Runtime socket directories are managed by systemd,
+and daemon code is installed root-owned under `/usr/lib/moos`.
+
+This is local authorization, not remote authentication. The guest's current
+blank development root password makes terminal access especially sensitive.
+Do not publish `/run/moos/moosd.sock`, proxy it over Tailscale, or treat
+Tailscale identity as sufficient application authorization. A later remote
+service must add explicit authenticated, authorized, encrypted operations
+without changing the host/guest boundary.
+
+Runtime status is derived from systemd `LoadState`, `ActiveState`, `SubState`,
+and `Result`, producing `starting`, `running`, `stopping`, `stopped`, `failed`,
+or `unknown`. A systemctl failure is `unknown`, not silently `stopped`. Launch
+uses a synchronous `systemd-run --service-type=exec` handoff, so the launcher
+is reaped and immediate exec failures are reported. Stop preserves console
+recoverability until systemctl confirms success.
 
 ## Explicit escape hatch
 
@@ -196,6 +242,7 @@ silently fall back to it.
 - define and validate a narrow host/guest IPC contract
 - add negative tests for path traversal, unauthorized operations, and cleanup
 - make persistent Instance storage portable and separately backupable
+- replace local group trust with an authenticated/authorized remote boundary
 
 Until those items exist, MOOS has a safe local QEMU baseline, not a complete
 production-grade multi-Instance host manager.

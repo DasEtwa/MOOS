@@ -126,9 +126,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$INSTANCE_ID" in
-    [a-z][a-z0-9-]*)
-        ;;
-    *)
+    ''|[!a-z]*|*[!a-z0-9-]*)
         echo 'error: --id must start with a lowercase letter and contain only a-z, 0-9, or -' >&2
         exit 2
         ;;
@@ -199,6 +197,7 @@ fi
 INSTANCE_DIR="$INSTANCE_ROOT/$INSTANCE_ID"
 STAGED_QEMU="$RUNTIME_QEMU_ROOT/bin/qemu-system-x86_64"
 UNIT="moos-instance-$INSTANCE_ID.service"
+CONSOLE_SOCKET="/run/moos-instances/$INSTANCE_ID/console.sock"
 
 if [ -n "$IO_DEVICE" ]; then
     io_description="$IO_DEVICE ($IO_READ read / $IO_WRITE write)"
@@ -218,6 +217,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
     printf 'cgroup TasksMax: %s\n' "$TASKS_MAX"
     printf 'cgroup I/O: %s\n' "$io_description"
     printf 'network: %s\n' "$NETWORK"
+    printf 'console: reconnectable managed Unix socket (path not exposed to clients)\n'
     printf 'host home: protected (ProtectHome=yes, no source bind)\n'
     printf 'host processes: hidden (ProtectProc=invisible, ProcSubset=all for bwrap)\n'
     printf 'host devices: private (PrivateDevices=yes, no KVM/USB/GPU passthrough)\n'
@@ -320,9 +320,6 @@ run_managed_instance() {
         exec systemd-run \
             --unit="$UNIT" \
             --service-type=exec \
-            --pty \
-            --wait \
-            --collect \
             --uid="$RUNTIME_USER" \
             --gid="$RUNTIME_GROUP" \
             --property=SupplementaryGroups= \
@@ -351,12 +348,19 @@ run_managed_instance() {
             --property=KillMode=control-group \
             --property=OOMPolicy=stop \
             --property=UMask=0077 \
+            --property="RuntimeDirectory=moos-instances/$INSTANCE_ID" \
+            --property=RuntimeDirectoryMode=0700 \
+            --property=StandardInput=null \
+            --property=StandardOutput=journal \
+            --property=StandardError=journal \
+            --property="SyslogIdentifier=moos-instance-$INSTANCE_ID" \
             --property='RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK' \
             -- \
             "$LIBEXEC_ROOT/run-qemu.sh" \
             --serial-only \
             --image-dir "$INSTANCE_DIR" \
             --qemu "$STAGED_QEMU" \
+            --console-socket "$CONSOLE_SOCKET" \
             --network "$NETWORK" \
             --memory "$GUEST_MEMORY" \
             --cpus "$VCPUS"
@@ -365,9 +369,6 @@ run_managed_instance() {
     exec systemd-run \
         --unit="$UNIT" \
         --service-type=exec \
-        --pty \
-        --wait \
-        --collect \
         --uid="$RUNTIME_USER" \
         --gid="$RUNTIME_GROUP" \
         --property=SupplementaryGroups= \
@@ -393,12 +394,19 @@ run_managed_instance() {
         --property=KillMode=control-group \
         --property=OOMPolicy=stop \
         --property=UMask=0077 \
+        --property="RuntimeDirectory=moos-instances/$INSTANCE_ID" \
+        --property=RuntimeDirectoryMode=0700 \
+        --property=StandardInput=null \
+        --property=StandardOutput=journal \
+        --property=StandardError=journal \
+        --property="SyslogIdentifier=moos-instance-$INSTANCE_ID" \
         --property='RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK' \
         -- \
         "$LIBEXEC_ROOT/run-qemu.sh" \
         --serial-only \
         --image-dir "$INSTANCE_DIR" \
         --qemu "$STAGED_QEMU" \
+        --console-socket "$CONSOLE_SOCKET" \
         --network "$NETWORK" \
         --memory "$GUEST_MEMORY" \
         --cpus "$VCPUS"

@@ -13,6 +13,7 @@ ISOLATED=1
 NETWORK_MODE='none'
 MEMORY='256M'
 CPUS='1'
+CONSOLE_SOCKET=''
 MAX_MEMORY_MIB=4096
 MAX_CPUS=8
 DRY_RUN=0
@@ -28,6 +29,8 @@ Options:
   --qemu PATH         Use an explicit qemu-system-x86_64 binary.
   --memory SIZE       Guest memory, default 256M.
   --cpus COUNT        Guest vCPU count, default 1.
+  --console-socket PATH
+                      Use the managed /run/moos-instances/ID/console.sock.
   --direct            Bypass the rootless host sandbox (explicit dev escape hatch).
   --dry-run           Print the isolation configuration without starting QEMU.
   -h, --help          Show this help.
@@ -84,6 +87,14 @@ while [ "$#" -gt 0 ]; do
                 exit 2
             }
             CPUS="$2"
+            shift 2
+            ;;
+        --console-socket)
+            [ "$#" -ge 2 ] || {
+                echo 'error: --console-socket requires a path' >&2
+                exit 2
+            }
+            CONSOLE_SOCKET="$2"
             shift 2
             ;;
         --direct)
@@ -176,6 +187,25 @@ esac
     exit 2
 }
 
+if [ -n "$CONSOLE_SOCKET" ]; then
+    CONSOLE_DIR=${CONSOLE_SOCKET%/console.sock}
+    CONSOLE_ID=${CONSOLE_DIR##*/}
+    [ "$CONSOLE_DIR" = "/run/moos-instances/$CONSOLE_ID" ] || {
+        echo 'error: console socket must be /run/moos-instances/ID/console.sock' >&2
+        exit 2
+    }
+    case "$CONSOLE_ID" in
+        ''|[!a-z]*|*[!a-z0-9-]*)
+            echo 'error: console socket Instance ID is invalid' >&2
+            exit 2
+            ;;
+    esac
+    [ "${#CONSOLE_ID}" -le 32 ] || {
+        echo 'error: console socket Instance ID is too long' >&2
+        exit 2
+    }
+fi
+
 if [ "$QEMU_EXPLICIT" -eq 0 ] && [ ! -x "$QEMU" ]; then
     QEMU=$(command -v qemu-system-x86_64 || true)
 fi
@@ -239,6 +269,9 @@ if [ "$DRY_RUN" -eq 1 ]; then
     printf 'shared folders: none\n'
     printf 'host device passthrough: none (TCG, no KVM/USB/GPU passthrough)\n'
     printf 'host-guest channel: serial console only\n'
+    if [ -n "$CONSOLE_SOCKET" ]; then
+        printf 'serial endpoint: managed reconnectable Unix socket\n'
+    fi
     exit 0
 fi
 
@@ -247,7 +280,13 @@ if [ "$NETWORK_MODE" = 'user' ]; then
     NETWORK_ARGS='-net nic,model=virtio -net user'
 fi
 
-if [ "$SERIAL_ONLY" -eq 1 ]; then
+if [ -n "$CONSOLE_SOCKET" ]; then
+    [ -d "$CONSOLE_DIR" ] || {
+        echo "error: managed console directory is missing: $CONSOLE_DIR" >&2
+        exit 1
+    }
+    DISPLAY_ARGS="-display none -chardev socket,id=moos-serial,path=$CONSOLE_SOCKET,server=on,wait=off -serial chardev:moos-serial -monitor none"
+elif [ "$SERIAL_ONLY" -eq 1 ]; then
     DISPLAY_ARGS='-nographic -serial stdio -monitor none'
 else
     DISPLAY_ARGS='-device VGA -serial stdio -monitor none'
@@ -291,8 +330,16 @@ if [ "$NETWORK_MODE" = 'user' ]; then
 fi
 
 # The sandbox intentionally binds only QEMU's executable/runtime files and the
-# selected MOOS images. In particular, it does not bind /home, /root, /run,
-# host devices, or arbitrary repository directories.
+# selected MOOS images. Managed launches additionally bind only their dedicated
+# console directory. They never bind /home, /root, arbitrary /run paths, host
+# devices, or arbitrary repository directories.
+if [ -n "$CONSOLE_SOCKET" ]; then
+    BWRAP_CONSOLE_ARGS="--dir /run --dir /run/moos-console --bind $CONSOLE_DIR /run/moos-console"
+    QEMU_CONSOLE_ARGS='-display none -chardev socket,id=moos-serial,path=/run/moos-console/console.sock,server=on,wait=off -serial chardev:moos-serial -monitor none'
+else
+    BWRAP_CONSOLE_ARGS=''
+    QEMU_CONSOLE_ARGS='-nographic -serial stdio -monitor none'
+fi
 # shellcheck disable=SC2086
 exec bwrap \
     --unshare-all \
@@ -321,6 +368,7 @@ exec bwrap \
     --dir /opt/moos-qemu/bin \
     --dir /opt/moos-qemu/share \
     --dir /moos \
+    $BWRAP_CONSOLE_ARGS \
     --ro-bind "$QEMU" "$SANDBOX_QEMU" \
     --ro-bind "$QEMU_LIB_DIR" "$SANDBOX_LIB" \
     --ro-bind "$QEMU_SHARE_DIR" "$SANDBOX_SHARE" \
@@ -345,8 +393,6 @@ exec bwrap \
     -append "rootwait root=/dev/vda console=tty1 console=ttyS0" \
     -drive file=/moos/rootfs.ext2,if=virtio,snapshot=on,format=raw \
     $NETWORK_ARGS \
-    -nographic \
-    -serial stdio \
-    -monitor none \
+    $QEMU_CONSOLE_ARGS \
     -L "$SANDBOX_SHARE" \
     "$@"

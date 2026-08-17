@@ -1,416 +1,344 @@
-# MOOS development roadmap
+# MOOS execution roadmap
 
-The roadmap keeps the core small and adds one boundary at a time. Each phase
-has an explicit stopping point so future UI, client, and streaming ideas do not
-leak into the base system prematurely.
+This file is the execution source of truth. Each slice produces one observable
+capability, is tested before the next slice starts, and records its actual
+verification. The existing Linux/runtime foundation remains protected while
+the mobile MVP is built around one Personal MOOS system.
 
-## Phase 0 — Repository foundation
+## Verified foundation
 
-### Goal
+Complete before this roadmap: Buildroot x86_64 Linux 6.18.7, BusyBox 1.38.0,
+QEMU boot/login/networking, MOOS utilities, reboot/poweroff smoke tests,
+rootless Bubblewrap isolation, deny-by-default networking, dedicated
+`moos-runtime`, staged runtime files, and systemd/cgroup-v2 CPU/RAM/swap/task/I/O
+limits. The blank root password remains development-only.
 
-Make the current working image understandable and reproducible from a clean
-repository checkout.
+## Slice M1 — Personal MOOS identity
 
-### Prerequisites
+Goal: Define the existing primary runtime as the mobile-facing Personal MOOS.
 
-- A Linux development host with Buildroot host prerequisites.
-- Git access to the MOOS repository.
-- QEMU for the x86_64 smoke test.
+Prerequisites: Verified Phase 3 runtime foundation.
 
-### Concrete tasks
+Changes:
 
-- Keep the repository-level documentation and agent instructions current.
-- Track the MOOS Buildroot defconfig.
-- Pin the Buildroot revision used for the baseline.
-- Provide portable build and QEMU entry points.
-- Ignore generated Buildroot, compiler, rootfs, image, cache, and local runtime
-  data.
-- Record the current boot, login, network, and rootfs-size baseline.
+- Add one stable internal identifier: `personal`.
+- Keep `Personal MOOS` as a separate display name.
+- Expose identity through a small host-side tool and tracked config.
+- Do not add a database, instance registry, or lifecycle behavior.
 
-### Completion criteria
+Tests: shell syntax, identity contract test, existing isolation and QEMU tests.
 
-- A clone explains its structure and current limitations.
-- The build command does not depend on a developer's absolute path.
-- Generated artifacts are not eligible for accidental commits.
-- QEMU launch instructions use repository-relative paths.
+Completion criteria: Host tooling identifies Personal consistently without
+temporary names such as `test-phase31`.
 
-### Tests and checks
+Do not do yet: multi-instance management, `moosd`, remote APIs, or iOS code.
 
-- sh -n scripts/build.sh scripts/run-qemu.sh
-- git check-ignore on buildroot/, output/, and host-tools/
-- Configure/build the tracked defconfig.
-- Boot the resulting image and observe login, banner, and DHCP.
+Status: Complete
+Implemented commit: `2c99d8010a7d22cce8bbf75222fcc689b2848814`
+Actual verification: `sh -n scripts/*.sh`; `python3 tests/personal_identity.py`;
+`python3 tests/runtime_isolation.py`; `python3 tests/qemu_launcher.py`; and
+`python3 tests/qemu_smoke.py` all passed. `git diff --check` passed.
+Blockers: none
+Deviations: none
 
-### Do not do yet
+## Slice M2 — Personal host runtime control library
 
-- Do not add a daemon, remote API, GUI, mobile client, Tailscale dependency,
-  or streaming protocol.
-- Do not commit the full Buildroot checkout or generated images.
+Goal: Reuse the existing safe runtime path through a single host-side control
+implementation for Personal.
 
-## Phase 1 — Stable minimal MOOS
+Prerequisites: M1 complete.
 
-Status: the current x86_64 baseline has a passing automated boot/login/network/
-filesystem/reboot/poweroff smoke test. The development-only blank root password
-remains intentionally open until a release authentication model exists.
+Changes: status, start, stop, optional reboot, safe serial connection metadata,
+duplicate-start rejection, and stale-state handling. No duplicated QEMU launch
+logic; no network API.
 
-### Goal
+Tests: unit tests for transitions and invalid state plus QEMU integration where
+available; all existing isolation tests remain green.
 
-Make boot, init, shell, networking, filesystem behavior, shutdown, and login
-reliable enough for repeatable development.
+Completion criteria: Personal can be started/stopped/status-checked by one
+library while the existing sandbox and cgroup path remains the implementation.
 
-### Prerequisites
+Do not do yet: general instance manager, daemon, authentication, or Tailscale.
 
-- Phase 0 repository baseline.
-- A repeatable QEMU smoke test.
+Status: Complete
+Implemented commit: `feat: add personal runtime control library`
+Actual verification: `python3 tests/runtime_control.py`; `python3 tests/personal_identity.py`;
+`python3 tests/runtime_isolation.py`; `python3 tests/qemu_launcher.py`;
+`python3 tests/qemu_smoke.py`; `python3 -m py_compile ...`; and `git diff --check`
+all passed. The adapter delegates launch to `scripts/run-instance.sh`, does not
+expose host PTY paths, and keeps reboot unavailable until M5.
+Blockers: none
+Deviations: none
 
-### Concrete tasks
+## Slice M3 — Local `moosd` MVP
 
-- Define the intended init and shutdown behavior.
-- Add small tests for the login banner and system information.
-- Test clean QEMU shutdown/reboot behavior.
-- Decide how development authentication differs from release authentication.
-- Keep filesystem layout and writable paths explicit.
-- Track meaningful kernel/BusyBox/config changes.
+Goal: Run a minimal local host daemon, preferably Rust only if its dependency
+cost is justified.
 
-### Completion criteria
+Prerequisites: M2 complete.
 
-- Multiple clean boots reach the expected login prompt.
-- DHCP and basic network inspection are repeatable.
-- Shutdown does not leave the development workflow ambiguous.
-- Rootfs size and boot-time changes are recorded.
+Changes: Unix-domain socket, host status, Personal state, start/stop, and a
+future-ready event shape. No remote listener.
 
-### Tests and checks
+Tests: daemon startup, socket permissions, typed requests, invalid requests,
+and lifecycle integration.
 
-- Boot smoke test in serial-only QEMU.
-- Check uname, df, ip, and /proc values from the guest.
-- Verify the banner in an interactive shell.
-- Verify no host directory is implicitly shared.
+Completion criteria: local clients can control Personal through `moosd` without
+direct QEMU lifecycle logic.
 
-### Do not do yet
+Do not do yet: accounts, Flatpak, streaming, agents, cloud services.
 
-- Do not broaden the base image with a desktop stack.
-- Do not expose a network listener from the guest without an explicit threat
-  model and authentication design.
+Status: Complete
+Implemented commit: `feat: add local moosd MVP`
+Actual verification: `python3 tests/moosd_protocol.py`; `python3 tests/runtime_control.py`;
+`python3 tests/personal_identity.py`; `python3 tests/runtime_isolation.py`;
+`python3 tests/qemu_launcher.py`; `python3 tests/qemu_smoke.py`;
+`python3 -m py_compile ...`; shell syntax, and `git diff --check` all passed.
+The daemon is Unix-socket-only, uses typed status/start/stop operations, and
+rejects arbitrary `exec` and unknown request fields.
+Blockers: none
+Deviations: none
 
-## Phase 2 — MOOS tooling
+## Slice M4 — Local MOOS CLI
+
+Goal: Provide `moos status`, `moos personal status/start/stop` and a terminal
+placeholder through the daemon only.
+
+Prerequisites: M3 complete.
+
+Changes: small CLI client; no QEMU implementation in the CLI.
+
+Tests: command contract, daemon integration, permission/error behavior.
+
+Completion criteria: normal local operation uses the same control surface as
+future mobile clients.
+
+Do not do yet: remote transport or UI logic.
 
-Status: `moos-version`, `moos-info`, and `moos-network` are implemented as
-small BusyBox-compatible shell utilities. `moos-power` is a deliberately thin
-development wrapper with read-only status plus explicit local `reboot` and
-`poweroff` actions. Richer session and policy behavior remains deferred.
+Status: Complete
+Implemented commit: `feat: add local moos CLI`
+Actual verification: `python3 tests/moos_cli.py`; `python3 tests/moosd_protocol.py`;
+`python3 tests/runtime_control.py`; `python3 tests/personal_identity.py`;
+`python3 tests/runtime_isolation.py`; `python3 tests/qemu_launcher.py`;
+`python3 tests/qemu_smoke.py`; Python compilation, shell syntax, and
+`git diff --check` all passed. The CLI has no QEMU lifecycle implementation.
+Blockers: none
+Deviations: none
 
-### Goal
+## Slice M5 — Terminal bridge
 
-Add only small utilities that make the minimal system easier to operate.
+Goal: Bridge a bidirectional terminal channel from `moosd` to the Personal
+guest's existing serial console.
 
-### Prerequisites
+Prerequisites: M4 complete.
 
-- Stable shell and filesystem behavior from Phase 1.
-- A demonstrated need for each command.
+Changes: bounded incremental NDJSON framing; typed open/input/output/close
+lifecycle; systemd-owned reconnectable QEMU serial socket; accurate structured
+systemd status; synchronous/reaped launcher handoff; confirmed-stop semantics;
+and a socket-activated, group-restricted local `moosd` service model. Client or
+daemon disconnect does not stop the guest; input is delivered only to the
+guest channel.
 
-### Concrete tasks
+Tests: local interactive terminal, `moos-info`, disconnect/reconnect, cleanup,
+and negative host-command tests.
 
-- Consider moos-info, moos-version, moos-network, and moos-power.
-- Define output that is readable by humans and stable enough for scripts.
-- Prefer BusyBox-compatible shell for simple commands.
-- Use C or Rust only when shell is insufficient for the actual requirement.
+Completion criteria: `MOOS Linux` and `# moos-info` work through the local bridge.
 
-### Completion criteria
+Do not do yet: graphical streaming or arbitrary host shell execution.
 
-- Each utility has a narrow purpose and documented exit behavior.
-- Utilities work without unnecessary runtime dependencies.
-- Tests cover successful and failure paths.
+Status: Complete
+Implemented commits: `feat: bridge Personal terminal through moosd`;
+`fix: harden M5 terminal and runtime lifecycle`
+Actual verification on 2026-08-17: Python compilation, shell syntax,
+`git diff --check`, protocol, CLI, identity, runtime-control, isolation-policy,
+launcher, and QEMU smoke tests pass. The real unprivileged QEMU bridge test
+booted MOOS, ran `moos-info`, terminated/reaped `moosd` while QEMU remained
+running, started a new daemon, reconnected, ran `moos-info` again, and powered
+off cleanly. Regression coverage includes fragmented/concatenated frames,
+combined terminal ACK/output, malformed/oversized/non-object JSON, failed
+launch, failed stop, all structured states, and process-memory-independent
+console reconnect. The administrator-executed managed integration test then
+passed with an actual systemd-managed Personal start and login, real
+`moos-info`, daemon restart while the guest remained running, successful
+terminal reconnect, managed stop, and process reaping.
+Blockers: none
+Deviations: the original in-memory PTY design was replaced by a fixed private
+QEMU Unix serial socket so reconnect does not require restarting the VM.
 
-### Tests and checks
+## Slice M6 — Versioned protocol
 
-- Run utilities in QEMU.
-- Check output with shell tests.
-- Measure rootfs and boot-time impact.
+Goal: Define protocol version 1 around only implemented capabilities.
 
-### Do not do yet
+Prerequisites: M5 complete.
 
-- Do not create a general command framework or package manager.
-- Do not add remote-control semantics to local utilities by accident.
+Changes: typed status/start/stop/terminal messages, structured errors, no
+internal PIDs/paths/unit names, and transport abstraction.
 
-## Phase 3 — Host/guest isolation
+Tests: protocol conformance, malformed messages, compatibility and size limits.
 
-Status: the default serial QEMU launcher uses a rootless bubblewrap
-user/mount/PID/IPC namespace, TCG, bounded default memory/CPU, a temporary
-rootfs snapshot, no shared folders or host devices, and deny-by-default
-networking. The repository also contains a deliberate Phase 3.1 activation
-path for a locked `moos-runtime` account, private Instance staging, and
-systemd/cgroup-v2 CPU, RAM, PID, and I/O limits. That path was activated and
-tested on one Kubuntu host; persistent Instance metadata and a typed host/guest
-IPC channel remain open work.
+Completion criteria: a non-UI client can use the documented protocol.
 
-### Goal
+Do not do yet: public exposure or final mobile UI assumptions.
 
-Define and enforce safe boundaries before MOOS controls anything outside the
-guest.
+Status: Complete
+Implemented commits: `feat: define MOOS Protocol v1`;
+`fix: enforce M6 protocol contracts`
+Actual verification: `python3 tests/protocol_contract.py`; `python3 tests/moosd_protocol.py`;
+`python3 tests/moos_cli.py`; `python3 tests/runtime_control.py`;
+`python3 tests/personal_identity.py`; `python3 tests/runtime_isolation.py`;
+`python3 tests/qemu_launcher.py`; `python3 tests/qemu_smoke.py`;
+`python3 tests/qemu_terminal_bridge.py`; Python compilation, shell syntax, and
+`git diff --check` all passed. Protocol v1 is documented in `PROTOCOL.md`,
+centralizes framing/version/typed validation, and does not expose a remote
+transport or Host internals. Follow-up hardening added strict integer-version
+checks, typed operation-specific response validation in daemon and CLI,
+structured truncated-frame handling at socket EOF, response compatibility
+checks, and exact frame-size boundary coverage.
+Installed-control-plane acceptance on 2026-08-17 also passed from the current
+checkout: `sudo ./scripts/setup-control-plane.sh --source-root "$PWD"`,
+`sudo systemctl restart moosd.socket`, and `sudo python3
+tests/managed_personal.py`. The real systemd-managed Personal start/login,
+framed `moos-info`, daemon restart/reconnect, managed stop, and process reaping
+all passed. The socket remains enabled/active and the socket-activated daemon is
+inactive with `Result=success` when idle.
+Blockers: none
+Deviations: M6 formalizes the Protocol v1 contract already exercised by the
+hardened M5 local transport; it does not open a new network transport.
 
-### Prerequisites
+## Slice M7 — Authentication and pairing MVP
 
-- Stable local image and an explicit host-side execution model.
-- A threat model for the development machine.
+Goal: Pair one device securely without committed credentials.
 
-### Concrete tasks
+Prerequisites: M6 complete.
 
-- Activate `scripts/setup-runtime-user.sh` after reviewing its dry-run.
-- Stage an Instance outside the developer checkout with `stage-instance.sh`.
-- Start it through `run-instance.sh` and inspect the resulting systemd cgroup.
-- Define minimal QEMU permissions and device access.
-- Keep CPU, memory, task, and I/O budgets explicit per Instance.
-- Define controlled shared directories, if one is actually needed.
-- Choose safe IPC boundaries and validate all messages.
-- Add negative tests for path traversal and unauthorized operations.
+Changes: random device credential/key, host-side authorized-device store,
+revocation, and manual/QR-ready pairing representation.
 
-### Completion criteria
+Tests: authentication, unauthorized requests, revocation, rotation, and secret
+handling. Tailscale membership is not treated as authorization.
 
-- The guest cannot reach arbitrary host files by default.
-- Host-side helpers have explicit, least-privilege capabilities.
-- Failure and cleanup behavior is documented.
+Completion criteria: one device can be authorized and revoked safely.
 
-### Tests and checks
+Do not do yet: Google/Gmail login or global account infrastructure.
 
-- Run `python3 tests/qemu_launcher.py` to inspect deny-by-default launcher
-  behavior and rejection paths.
-- Run `python3 tests/runtime_isolation.py` to inspect the account, staging, and
-  cgroup policy without modifying the host.
-- Run the QEMU smoke test with explicit user networking and with networking
-  disabled (`MOOS_TEST_NETWORK=user|none`).
-- Inspect QEMU command-line permissions and devices.
-- Inspect `systemctl status moos-instance-<id>.service` while a managed Instance
-  is running and verify its cgroup limits.
-- Test access to allowed and denied paths.
-- Test process cleanup after guest or host failure.
+Status: Planned
 
-### Do not do yet
+## Slice M8 — Tailscale host transport
 
-- Do not implement a host API that runs arbitrary commands as root.
-- Do not treat a private network as sufficient authorization.
-- Do not run the privileged setup automatically from a build or guest script.
-- Do not add shared folders, device passthrough, or host credentials to staging.
+Goal: Reach the same authenticated protocol through the Kubuntu Host's
+Tailscale interface.
 
-## Phase 4 — moosd
+Prerequisites: M7 complete.
 
-### Goal
+Changes: conservative host binding, no guest Tailscale, no public router ports,
+local Unix-socket access preserved, firewall expectations documented.
 
-Design a small host management daemon only after the host/guest boundary is
-understood.
+Tests: remote authenticated status and terminal with `moos-info`; unavailable
+transport and unauthorized-client behavior.
 
-### Prerequisites
+Completion criteria: iPhone-reachable host transport works without changing the
+guest's network model.
 
-- Phase 3 isolation model.
-- A concrete management use case.
-- A decision about the minimum service privilege.
+Do not do yet: public WAN exposure or transport-specific client logic.
 
-### Concrete tasks
+Status: Planned
 
-- Define health/status reporting.
-- Define VM/session lifecycle operations.
-- Define a controlled command or terminal interface.
-- Define file operations with path and size limits.
-- Add authentication, authorization, audit logging, and API versioning.
-- Introduce Rust only if a long-running service benefits from it.
+## Slice I1 — Native iOS project foundation
 
-### Completion criteria
+Goal: Add a native Swift/SwiftUI MOOS Mobile project with replaceable views.
 
-- The daemon exposes a small, documented set of operations.
-- No operation provides arbitrary host root execution.
-- Protocol errors, timeouts, disconnects, and cleanup are tested.
+Prerequisites: M6 protocol shape; M8 is needed for live connectivity.
 
-### Tests and checks
+Changes: branding, connection state, Host/Personal status, and placeholder
+Terminal/Files/Apps/Settings tiles. Only Terminal will eventually function.
 
-- Unit-test parsing and authorization.
-- Integration-test daemon-to-QEMU lifecycle.
-- Exercise invalid, unauthenticated, and over-privileged requests.
+Tests: Xcode project validation and simulator build where available.
 
-### Do not do yet
+Completion criteria: project opens/builds without embedding Host internals.
 
-- Do not couple the daemon to an iOS view hierarchy or a GUI layout.
-- Do not promise a frozen protocol before the operations are exercised.
+Do not do yet: graphical streaming or final radial/ring navigation.
 
-## Phase 5 — Remote protocol
+Status: Planned
 
-### Goal
+## Slice I2 — GitHub Actions iOS build
 
-Create a stable client-facing protocol independent of presentation.
+Goal: Build unsigned simulator/app artifacts on macOS CI without local Mac
+requirements.
 
-### Prerequisites
+Prerequisites: I1 complete.
 
-- A working, least-privilege moosd prototype.
-- Threat model and authentication design.
+Changes: workflow, dependency-free build verification, artifact documentation.
 
-### Concrete tasks
+Tests: GitHub Actions build; no signing secrets in Git.
 
-- Model status, sessions, shell, files, and power operations.
-- Version the protocol and define capability discovery.
-- Define request limits, timeouts, errors, and reconnect behavior.
-- Consider concepts such as GET /status, POST /session/start, and a terminal
-  WebSocket only as design examples.
+Completion criteria: CI can verify the project without Apple credentials.
 
-### Completion criteria
+Status: Planned
 
-- A non-UI client can use the protocol.
-- Authorization is operation-specific.
-- Compatibility and deprecation rules are documented.
+## Slice I3 — Mobile protocol client
 
-### Tests and checks
+Goal: Implement the iPhone-side authenticated versioned client.
 
-- Protocol conformance tests.
-- Authentication and authorization tests.
-- Fuzz or property-test parsers where practical.
+Prerequisites: M6, M7, I1.
 
-### Do not do yet
+Changes: configured Host, protocol check, Host/Personal state, reconnect and
+clear offline/error states; credentials in Keychain.
 
-- Do not select a mobile UI or streaming protocol as a prerequisite.
-- Do not expose the service publicly before security review.
+Tests: client protocol tests independent of SwiftUI.
 
-## Phase 6 — Remote access
+Status: Planned
 
-### Goal
+## Slice I4 — Native MOOS Home
 
-Make remote operation possible without turning MOOS into an implicit host
-backdoor.
+Goal: Render the first local/native MOOS shell on iPhone.
 
-### Prerequisites
+Prerequisites: I3 complete.
 
-- Versioned protocol and authenticated moosd.
-- Explicit deployment and key-management plan.
+Changes: flexible Home view showing Personal, Host, connection quality and
+Terminal/Files/Apps/Settings entry points.
 
-### Concrete tasks
+Tests: state rendering and offline/reconnect UI tests.
 
-- Evaluate Tailscale as an optional transport path on the host.
-- Keep Tailscale out of the guest unless a clear need appears.
-- Define device enrollment, revocation, and logging.
-- Add network failure and reconnect handling.
+Do not do yet: hard-code radial navigation or stream a Linux desktop.
 
-### Completion criteria
+Status: Planned
 
-- Remote access can be enabled deliberately and disabled cleanly.
-- Transport reachability and application authorization are separate checks.
-- No secret or auth key is stored in the repository.
+## Slice I5 — Native Terminal / mobile MVP stop point
 
-### Tests and checks
+Goal: Connect SwiftUI Terminal to the real Personal terminal channel.
 
-- Test authorized and unauthorized clients.
-- Test revocation and expired credentials.
-- Test operation when the transport is unavailable.
+Prerequisites: M8, I3, I4, and M5.
 
-### Do not do yet
+Changes: keyboard, scrolling output, connect/disconnect/reconnect, monospace
+rendering, and basic ANSI support if practical.
 
-- Do not treat Tailscale membership as full application authorization.
-- Do not bind the core image to one network provider.
+Tests: real iPhone runs `moos-info`, `moos-version`, and `moos-network` in the
+actual Personal guest; disconnect does not stop the guest.
 
-## Phase 7 — Mobile companion
+Completion criteria: the real iPhone reaches Personal MOOS over Tailscale and
+shows `moos-info` output.
 
-### Goal
+Status: Planned
 
-Provide an optional client for status and controlled operations.
+STOP: After I5 succeeds on a real iPhone, stop and review the experience.
 
-### Prerequisites
+## Future roadmap — do not implement before I5 review
 
-- Stable remote protocol and authentication.
-- Documented lifecycle and error semantics.
+- F1 Native Files UI for Personal guest files only.
+- F2 Structured guest control service and typed Host↔Guest IPC.
+- F3 Native Apps page backed by guest data.
+- F4 Flatpak inside Personal MOOS.
+- F5 Individual graphical Linux app streaming, not a default full desktop.
+- F6 Audio.
+- F7 Sibling multi-instance management; never nested virtualization.
+- F8 AI-agent instances only after multi-instance management is stable.
 
-### Concrete tasks
+## Invariants for every slice
 
-- Explore Swift/SwiftUI for connection status, terminal, files, sessions, and
-  power controls.
-- Store credentials in the platform keychain.
-- Keep client state derived from protocol responses, not guest internals.
-- Define offline, reconnect, and permission states.
-
-### Completion criteria
-
-- The client works against the documented protocol.
-- It handles failures without weakening authorization.
-- UI can change without changing the core service.
-
-### Tests and checks
-
-- Protocol integration tests independent of the UI.
-- Client tests for disconnects, stale sessions, and denied operations.
-
-### Do not do yet
-
-- Do not declare a final navigation system, radial menu, or desktop metaphor.
-- Do not move core logic into the client.
-
-## Phase 8 — Streaming research
-
-### Goal
-
-Determine whether remote desktop or application streaming is useful and safe.
-
-### Prerequisites
-
-- Stable remote protocol and client.
-- A specific latency-sensitive use case.
-
-### Concrete tasks
-
-- Compare desktop and individual-application streaming.
-- Measure video, audio, keyboard, mouse, and touch behavior.
-- Evaluate adaptive resolution, bandwidth, latency, and session isolation.
-- Record protocol and licensing tradeoffs before selecting technology.
-
-### Completion criteria
-
-- A measured prototype demonstrates a defined use case.
-- Security, resource use, and operational cost are understood.
-- The selected transport can remain a replaceable layer.
-
-### Tests and checks
-
-- Measure latency and resource use under realistic network conditions.
-- Test session termination and input isolation.
-
-### Do not do yet
-
-- Do not add a streaming stack to the minimal base image.
-- Do not select a protocol only because it is convenient for one client.
-
-## Phase 9 — Optional graphical MOOS environment
-
-### Goal
-
-Add a replaceable graphical shell only if the underlying system and remote
-interfaces justify it.
-
-### Prerequisites
-
-- Stable minimal system.
-- Stable remote boundaries if remote GUI use is intended.
-- Evidence that a graphical environment solves a real need.
-
-### Concrete tasks
-
-- Choose the smallest appropriate graphics stack.
-- Keep graphical startup separate from core init and shell operation.
-- Define fallback behavior when no display is available.
-- Measure rootfs, RAM, boot time, and maintenance cost.
-
-### Completion criteria
-
-- Console-only MOOS remains usable.
-- The graphical shell can be replaced without changing core services.
-- Resource and security impact is documented.
-
-### Tests and checks
-
-- Boot with and without graphics.
-- Test local and remote input isolation.
-- Measure footprint and startup regressions.
-
-### Do not do yet
-
-- Do not build the core architecture around a particular desktop or radial
-  menu.
-- Do not add GUI dependencies before the earlier phases are stable.
-
-## Next recommended milestone
-
-Finish Phase 0 validation on a fresh checkout, then begin Phase 1 with a small
-repeatable QEMU boot/login/network smoke test. The next feature should be
-chosen from a measured Phase 1 need, not from the future client or GUI ideas.
+- Run existing shell, policy, launcher, and QEMU tests where applicable.
+- Do not regress Bubblewrap, cgroups, no-KVM/no-GPU, no-Host-Home, or default
+  network isolation.
+- Keep client concepts stable and hide QEMU/systemd/path implementation details.
+- Use typed operations; never add an unrestricted Host `/exec` endpoint.
+- Inspect diff and Git status before commit; never stage generated artifacts,
+  images, binaries, credentials, or machine-specific paths.

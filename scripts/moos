@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+"""Small local client for the MOOS daemon."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import select
+import socket
+import sys
+from collections import deque
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+MODULE_ROOT = REPO_ROOT / "host"
+if not MODULE_ROOT.is_dir():
+    MODULE_ROOT = Path("/usr/lib/moos")
+sys.path.insert(0, str(MODULE_ROOT))
+
+from moos_protocol import (  # noqa: E402
+    ByteTransport,
+    ControlFailure,
+    ControlSuccess,
+    FrameDecoder,
+    FrameResult,
+    TerminalError,
+    TerminalOutput,
+    encode_frame,
+    make_control_request,
+    make_terminal_close,
+    make_terminal_input,
+    parse_control_response,
+    parse_terminal_response,
+)
+
+
+DEFAULT_SOCKET = Path("/run/moos/moosd.sock")
+READ_BYTES = 4096
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="moos")
+    parser.add_argument("--socket", type=Path, default=DEFAULT_SOCKET)
+    parser.add_argument("command", choices=("status", "personal"))
+    parser.add_argument("action", nargs="?", choices=("status", "start", "stop", "terminal"))
+    return parser.parse_args()
+
+
+def operation_for(args: argparse.Namespace) -> str:
+    if args.command == "status":
+        if args.action is not None:
+            raise ValueError("status does not accept an action")
+        return "status"
+    if args.action is None:
+        raise ValueError("personal requires status, start, stop, or terminal")
+    return f"personal.{args.action}"
+
+
+def _receive_frame(
+    connection: ByteTransport,
+    decoder: FrameDecoder,
+    pending: deque[FrameResult],
+) -> dict:
+    while True:
+        while pending:
+            result = pending.popleft()
+            if result.error is not None or result.frame is None:
+                raise ValueError("daemon sent an invalid protocol frame")
+            return result.frame
+        data = connection.recv(READ_BYTES)
+        if not data:
+            final = decoder.finish()
+            if final is not None:
+                raise ValueError("daemon sent a truncated protocol frame")
+            raise ConnectionError("daemon closed before sending a response")
+        pending.extend(decoder.feed(data))
+
+
+def request(socket_path: Path, operation: str) -> ControlSuccess | ControlFailure:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.connect(str(socket_path))
+        connection.sendall(
+            encode_frame(make_control_request(operation))
+        )
+        frame = _receive_frame(connection, FrameDecoder(), deque())
+        return parse_control_response(frame, expected_operation=operation)
+
+
+def _write_terminal_frame(frame: dict) -> bool:
+    terminal_frame = parse_terminal_response(frame)
+    if isinstance(terminal_frame, TerminalOutput):
+        sys.stdout.write(terminal_frame.data)
+        sys.stdout.flush()
+        return True
+    if isinstance(terminal_frame, TerminalError):
+        print(f"moos: terminal error: {terminal_frame.code}", file=sys.stderr)
+        return False
+    raise ValueError("daemon sent an invalid terminal frame")
+
+
+def terminal(socket_path: Path) -> int:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.connect(str(socket_path))
+        connection.sendall(
+            encode_frame(make_control_request("personal.terminal.open"))
+        )
+        decoder = FrameDecoder()
+        pending: deque[FrameResult] = deque()
+        acknowledgment = parse_control_response(
+            _receive_frame(connection, decoder, pending),
+            expected_operation="personal.terminal.open",
+        )
+        if isinstance(acknowledgment, ControlFailure):
+            print(
+                f"moos: {acknowledgment.code}: {acknowledgment.message}",
+                file=sys.stderr,
+            )
+            return 1
+        while True:
+            while pending:
+                result = pending.popleft()
+                if result.error is not None or result.frame is None:
+                    raise ValueError("daemon sent an invalid terminal frame")
+                if not _write_terminal_frame(result.frame):
+                    return 1
+            readable, _, _ = select.select([sys.stdin, connection], [], [])
+            if sys.stdin in readable:
+                data = os.read(sys.stdin.fileno(), 2048)
+                if not data:
+                    connection.sendall(encode_frame(make_terminal_close()))
+                    return 0
+                frame = make_terminal_input(data.decode("utf-8", errors="replace"))
+                connection.sendall(encode_frame(frame))
+            if connection in readable:
+                data = connection.recv(READ_BYTES)
+                if not data:
+                    final = decoder.finish()
+                    if final is not None:
+                        raise ValueError("daemon sent a truncated terminal frame")
+                    return 0
+                pending.extend(decoder.feed(data))
+                while pending:
+                    result = pending.popleft()
+                    if result.error is not None or result.frame is None:
+                        raise ValueError("daemon sent an invalid terminal frame")
+                    if not _write_terminal_frame(result.frame):
+                        return 1
+
+
+def main() -> int:
+    args = parse_args()
+    if args.command == "personal" and args.action == "terminal":
+        try:
+            return terminal(args.socket)
+        except (OSError, ConnectionError, ValueError) as error:
+            print(f"moos: daemon connection failed: {error}", file=sys.stderr)
+            return 1
+    try:
+        operation = operation_for(args)
+    except ValueError as error:
+        print(f"moos: {error}", file=sys.stderr)
+        return 2
+    try:
+        response = request(args.socket, operation)
+    except (OSError, ConnectionError, ValueError) as error:
+        print(f"moos: daemon connection failed: {error}", file=sys.stderr)
+        return 1
+
+    if isinstance(response, ControlFailure):
+        print(f"moos: {response.code}: {response.message}", file=sys.stderr)
+        return 1
+    print(json.dumps(response.data.as_dict(), indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
