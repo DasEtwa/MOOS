@@ -219,7 +219,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
     printf 'cgroup I/O: %s\n' "$io_description"
     printf 'network: %s\n' "$NETWORK"
     printf 'host home: protected (ProtectHome=yes, no source bind)\n'
-    printf 'host processes: hidden (ProtectProc=invisible, ProcSubset=pid)\n'
+    printf 'host processes: hidden (ProtectProc=invisible, ProcSubset=all for bwrap)\n'
     printf 'host devices: private (PrivateDevices=yes, no KVM/USB/GPU passthrough)\n'
     printf 'arbitrary host command API: none\n'
     printf 'host mutation: none (dry-run)\n'
@@ -341,7 +341,7 @@ run_managed_instance() {
             --property=PrivateTmp=yes \
             --property=ProtectHome=yes \
             --property=ProtectProc=invisible \
-            --property=ProcSubset=pid \
+            --property=ProcSubset=all \
             --property=ProtectSystem=strict \
             --property=ProtectKernelTunables=yes \
             --property=ProtectKernelModules=yes \
@@ -386,7 +386,7 @@ run_managed_instance() {
         --property=PrivateTmp=yes \
         --property=ProtectHome=yes \
         --property=ProtectProc=invisible \
-        --property=ProcSubset=pid \
+        --property=ProcSubset=all \
         --property=ProtectSystem=strict \
         --property=ProtectKernelTunables=yes \
         --property=ProtectKernelModules=yes \

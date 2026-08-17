@@ -91,8 +91,10 @@ the fixed serial launcher. Its default resource policy is:
 | I/O | 10 MiB/s read and write on the storage block device |
 | Network | off; `--network user` remains explicit |
 
-The service also enables `ProtectHome`, `ProtectProc=invisible` with
-`ProcSubset=pid`, `ProtectSystem=strict`, `PrivateDevices`, `PrivateTmp`,
+The service also enables `ProtectHome`, `ProtectProc=invisible`, and
+`ProcSubset=all` for Bubblewrap compatibility. `ProcSubset=pid` would hide
+`/proc/sys`, which Bubblewrap needs for its user-namespace setup. The service
+also enables `ProtectSystem=strict`, `PrivateDevices`, `PrivateTmp`,
 `NoNewPrivileges`, an empty capability bounding set, and group/task cleanup.
 I/O is denied if the storage block device cannot be resolved; pass
 `--io-device /dev/...` explicitly in that case. `--direct` and arbitrary QEMU
