@@ -346,22 +346,24 @@ Completion criteria: CI is configured to build and test the project with code
 signing disabled and no secrets, and separately produces an unsigned
 physical-device IPA only after verifying an iPhoneOS/arm64 executable.
 
-Status: Implemented; device artifact awaiting first hosted run
+Status: Complete
 Implemented commits: `ci: verify iOS shell without signing`,
-`ci: package unsigned iPhoneOS app`
+`ci: package unsigned iPhoneOS app`, `ci: update device artifact uploader`
 Actual verification: `python3 tests/ios_client.py`, GitHub Actions YAML parsing,
 `python3 tests/protocol_contract.py`, `python3 tests/runtime_isolation.py`,
 Python compilation, shared-scheme XML validation, and `git diff --check` passed.
-Both hosted simulator build/test runs for PR #3 passed before the device job was
-added.
+GitHub Actions run `32058883408` on commit `8618281` passed both the unchanged
+simulator build/test job and the new unsigned device job. The device log records
+the `Release-iphoneos` product, `arm64-apple-ios17.0` target, and `platform IOS`;
+the uploaded `MOOS-unsigned-iphoneos-arm64` artifact contains `MOOS.ipa` with
+the standard `Payload/MOOSApp.app` layout.
 The workflow uses `macos-15`, Xcode 16.4, an iPhone 16 / iOS 18.5 simulator,
 `build-for-testing`, and `test-without-building` with code signing disabled. A
 separate Release build uses `iphoneos`, a generic iOS-device destination, and
 an explicit arm64 architecture; `lipo`, `vtool`, and the app's platform metadata
 must all confirm a physical-device product before `Payload/MOOSApp.app` is
 packaged and uploaded as `MOOS.ipa`.
-Blockers: the new physical-device job cannot run until its commit is pushed.
-No device-build or IPA-artifact success is claimed yet.
+Blockers: none
 Deviations: the device IPA remains unsigned and cannot be installed until a
 future signing/provisioning phase; no signing material is stored in CI.
 
