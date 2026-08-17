@@ -262,7 +262,7 @@ equivalent policy is deliberately evaluated.
 Severity: Observation
 Component: host runtime setup
 Category: Phase 3.1 activation
-Status: Implemented in repository; host activation pending
+Status: Verified on one Kubuntu host; broader host coverage pending
 
 ### Finding
 
@@ -274,17 +274,19 @@ The managed launcher creates a transient systemd service with `CPUQuota=200%`,
 `MemoryMax=2G`, `TasksMax=512`, automatic or explicit block-device I/O limits,
 `ProtectHome`, `ProtectSystem=strict`, `PrivateDevices`, and no new privileges.
 
-The privileged setup has not been run automatically on the current developer
-machine. The policy test validates command generation and rejection paths; it
-does not prove that a host administrator has activated the account or that the
-host's systemd policy accepts every property.
+The privileged setup was activated deliberately on one Kubuntu development
+host for Instance `test-phase31`. The managed service reached the MOOS login,
+obtained a user-mode DHCP lease, and accepted the configured systemd/cgroup
+policy. This is evidence for that host and configuration, not a guarantee that
+every distribution or systemd version accepts the same properties.
 
 ### Significance
 
 This keeps host-account creation and cgroup enforcement explicit and
 reproducible without silently changing the developer's machine. A managed
 Instance must not be treated as protected by these controls until the setup is
-reviewed, activated, and checked with `systemctl status` and cgroup inspection.
+reviewed, activated, and checked with `systemctl status` and cgroup inspection
+on the target host.
 
 ## Area checklist
 
@@ -300,7 +302,7 @@ reviewed, activated, and checked with `systemctl status` and cgroup inspection.
 | Hard-coded paths | Generated launcher/config contained a developer path; tracked scripts avoid it. |
 | Generated artifacts | buildroot/, output/, and host tools are large generated/local state and must stay ignored. |
 | Temporary files | Buildroot creates temporary files under its ignored output/build trees; no tracked temporary file was found. |
-| Host/guest boundaries | Rootless QEMU sandbox verified; Phase 3.1 runtime account/cgroup activation is explicit and not automatic; host IPC remains future work. |
+| Host/guest boundaries | Rootless QEMU sandbox and one real Phase 3.1 runtime activation verified; host IPC remains future work. |
 | Secret exposure | No secret or credential was found; the empty root password is an insecure configuration, not a leaked secret. |
 | Developer-machine assumptions | Original launcher and generated config depended on the original absolute checkout path; portable scripts remove that dependency. |
 

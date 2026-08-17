@@ -113,9 +113,30 @@ I/O is denied if the storage block device cannot be resolved; pass
 `--io-device /dev/...` explicitly in that case. `--direct` and arbitrary QEMU
 arguments are not available through the managed runner.
 
-This is a host activation path, not a claim that the current developer machine
-has already been modified. The one-time setup requires deliberate root
-authorization.
+This is a host activation path that requires deliberate root authorization. It
+was manually activated and tested for `test-phase31` on one Kubuntu host; that
+result is host-specific and does not remove the need to inspect the policy on
+other machines.
+
+## Real-host validation
+
+The deliberate Phase 3.1 test on 2026-08-17 produced these observations:
+
+- the managed systemd unit stayed active while QEMU booted to the MOOS login;
+- explicit QEMU user networking obtained `10.0.2.15` by DHCP;
+- `CPUQuota=200%`, `MemoryMax=2G`, `MemorySwapMax=0`, `TasksMax=512`, and
+  `10,000,000` byte/s read/write I/O limits were visible in the active unit;
+- a bounded 1700M Guest tmpfs write reached a cgroup memory peak of
+  `1,973,456,896` bytes while the unit remained active with `Result=success`;
+- 600 bounded Guest `sleep` processes were started while the host cgroup
+  remained at `TasksCurrent=6`; Guest PIDs did not become host tasks;
+- `/home` and `/dev/kvm` were hidden from the Guest, and the Guest process list
+  contained Guest kernel/userspace processes only.
+
+`/root`, `/run`, and a possible `/dev/dri` entry in the Guest are not host
+paths: they belong to the Guest filesystem or its emulated QEMU graphics
+device. The test does not claim that the future host API, shared folders, or
+host/guest IPC are implemented.
 
 ## Network boundary
 

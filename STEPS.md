@@ -137,11 +137,11 @@ Add only small utilities that make the minimal system easier to operate.
 Status: the default serial QEMU launcher uses a rootless bubblewrap
 user/mount/PID/IPC namespace, TCG, bounded default memory/CPU, a temporary
 rootfs snapshot, no shared folders or host devices, and deny-by-default
-networking. The repository now also contains a deliberate Phase 3.1 activation
+networking. The repository also contains a deliberate Phase 3.1 activation
 path for a locked `moos-runtime` account, private Instance staging, and
-systemd/cgroup-v2 CPU, RAM, PID, and I/O limits. The privileged activation has
-not been run automatically. Persistent Instance metadata and a typed
-host/guest IPC channel remain open work.
+systemd/cgroup-v2 CPU, RAM, PID, and I/O limits. That path was activated and
+tested on one Kubuntu host; persistent Instance metadata and a typed host/guest
+IPC channel remain open work.
 
 ### Goal
 
