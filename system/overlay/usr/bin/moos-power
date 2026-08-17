@@ -1,0 +1,34 @@
+#!/bin/sh
+
+set -eu
+
+usage() {
+    printf '%s\n' \
+        'Usage: moos-power [status|reboot|poweroff]' \
+        '       status is read-only; reboot and poweroff call the current BusyBox actions.'
+}
+
+action=${1:-status}
+
+case "$action" in
+    status)
+        printf 'MOOS power\n'
+        printf 'mode: development\n'
+        printf 'session: BusyBox init (MOOS session manager not implemented)\n'
+        printf 'actions: reboot, poweroff\n'
+        ;;
+    -h|--help)
+        usage
+        ;;
+    reboot|poweroff)
+        if [ "$(id -u)" -ne 0 ]; then
+            echo "moos-power: $action requires root" >&2
+            exit 1
+        fi
+        exec "$action"
+        ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+esac

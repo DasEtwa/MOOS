@@ -1,0 +1,40 @@
+#!/bin/sh
+
+set -eu
+
+case "${1:-}" in
+    '')
+        ;;
+    -h|--help)
+        printf 'Usage: moos-network\n'
+        exit 0
+        ;;
+    *)
+        echo 'Usage: moos-network' >&2
+        exit 2
+        ;;
+esac
+
+if ! command -v ip >/dev/null 2>&1; then
+    echo 'moos-network: ip command is missing' >&2
+    exit 1
+fi
+
+hostname_value=$(hostname 2>/dev/null || printf '?')
+ipv4=$(ip -4 addr show scope global 2>/dev/null | awk '/inet / {print $2; exit}')
+gateway=$(ip route 2>/dev/null | awk '/^default / {print $3; exit}')
+
+if [ -n "$ipv4" ]; then
+    status='online'
+else
+    status='offline'
+    ipv4='none'
+fi
+
+[ -n "$gateway" ] || gateway='none'
+
+printf 'MOOS network\n'
+printf 'hostname: %s\n' "$hostname_value"
+printf 'status: %s\n' "$status"
+printf 'IPv4: %s\n' "$ipv4"
+printf 'gateway: %s\n' "$gateway"
