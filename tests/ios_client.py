@@ -100,7 +100,7 @@ def main() -> None:
         'test "$PLATFORM_NAME" = "iphoneos"',
         "Payload/MOOSApp.app",
         "MOOS.ipa",
-        "actions/upload-artifact@v4",
+        "actions/upload-artifact@v7",
         "MOOS-unsigned-iphoneos-arm64",
     ):
         assert device_requirement in workflow_text, (
