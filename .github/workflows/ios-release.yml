@@ -1,0 +1,382 @@
+name: iOS Release
+
+on:
+  push:
+    tags:
+      - "ios-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-release
+  cancel-in-progress: false
+
+jobs:
+  validate-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      build_version: ${{ steps.metadata.outputs.build_version }}
+      bundle_identifier: ${{ steps.metadata.outputs.bundle_identifier }}
+      min_os_version: ${{ steps.metadata.outputs.min_os_version }}
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require tag at current default branch tip
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin \
+            "$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
+          DEFAULT_SHA="$(git rev-parse "origin/$DEFAULT_BRANCH")"
+          if [[ "$RELEASE_SHA" != "$DEFAULT_SHA" ]]; then
+            echo "Release tag must point exactly at current $DEFAULT_BRANCH ($DEFAULT_SHA), not $RELEASE_SHA" >&2
+            exit 1
+          fi
+
+      - name: Validate tag against Xcode metadata
+        id: metadata
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 scripts/ios_release_metadata.py validate-project \
+            --project ios/MOOSApp/MOOSApp.xcodeproj/project.pbxproj \
+            --tag "$RELEASE_TAG" \
+            --format github >> "$GITHUB_OUTPUT"
+
+  ios-ci:
+    needs: validate-release
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ios.yml
+
+  prepare-release:
+    needs:
+      - validate-release
+      - ios-ci
+    runs-on: macos-15
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: read
+    outputs:
+      source_url: ${{ steps.source-url.outputs.url }}
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select Xcode 16.4
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Configure existing GitHub Pages site
+        id: pages
+        uses: actions/configure-pages@v6
+
+      - name: Record stable source URL
+        id: source-url
+        env:
+          PAGES_BASE_URL: ${{ steps.pages.outputs.base_url }}
+        run: echo "url=${PAGES_BASE_URL%/}/ios/source.json" >> "$GITHUB_OUTPUT"
+
+      - name: Download canonical unsigned IPA
+        uses: actions/download-artifact@v8
+        with:
+          name: MOOS-unsigned-iphoneos-arm64
+          path: ${{ runner.temp }}/device-artifact
+
+      - name: Revalidate release IPA metadata
+        env:
+          EXPECTED_VERSION: ${{ needs.validate-release.outputs.version }}
+          EXPECTED_BUILD: ${{ needs.validate-release.outputs.build_version }}
+          EXPECTED_BUNDLE_ID: ${{ needs.validate-release.outputs.bundle_identifier }}
+        run: |
+          set -euo pipefail
+          IPA_PATH="$RUNNER_TEMP/device-artifact/MOOS.ipa"
+          APP_ROOT="$RUNNER_TEMP/release-app"
+          mkdir -p "$APP_ROOT"
+          /usr/bin/unzip -q "$IPA_PATH" -d "$APP_ROOT"
+          ./scripts/validate-ios-app.sh \
+            --app "$APP_ROOT/Payload/MOOSApp.app" \
+            --bundle-id "$EXPECTED_BUNDLE_ID" \
+            --version "$EXPECTED_VERSION" \
+            --build "$EXPECTED_BUILD"
+
+      - name: Require a new release tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release already exists for $RELEASE_TAG; refusing to replace immutable assets" >&2
+            exit 1
+          fi
+
+      - name: Generate release notes and AltSource
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ needs.validate-release.outputs.version }}
+          RELEASE_BUILD: ${{ needs.validate-release.outputs.build_version }}
+          MIN_OS_VERSION: ${{ needs.validate-release.outputs.min_os_version }}
+          PAGES_BASE_URL: ${{ steps.pages.outputs.base_url }}
+        run: |
+          set -euo pipefail
+          IPA_PATH="$RUNNER_TEMP/device-artifact/MOOS.ipa"
+          RELEASE_ROOT="$RUNNER_TEMP/release-payload"
+          SITE_ROOT="$RUNNER_TEMP/pages-site"
+          NOTES_PATH="$RUNNER_TEMP/release-notes.md"
+          SOURCE_PATH="$SITE_ROOT/ios/source.json"
+          BASE_SOURCE="distribution/ios/source-template.json"
+          ICON_URL="${PAGES_BASE_URL%/}/ios/icon.png"
+
+          RELEASE_TAGS_PATH="$RUNNER_TEMP/published-ios-release-tags.txt"
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select(.draft == false and .prerelease == false and (.tag_name | startswith("ios-v"))) | .tag_name' \
+            > "$RELEASE_TAGS_PATH"
+          PREVIOUS_TAG="$(python3 scripts/ios_release_metadata.py \
+            select-previous-release \
+            --current-version "$RELEASE_VERSION" \
+            --tags-file "$RELEASE_TAGS_PATH")"
+          if [[ -n "$PREVIOUS_TAG" ]]; then
+            PREVIOUS_ROOT="$RUNNER_TEMP/previous-source"
+            mkdir -p "$PREVIOUS_ROOT"
+            gh release download "$PREVIOUS_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern MOOS-alt-source.json \
+              --dir "$PREVIOUS_ROOT"
+            BASE_SOURCE="$PREVIOUS_ROOT/MOOS-alt-source.json"
+          fi
+
+          {
+            echo "MOOS iOS $RELEASE_VERSION (build $RELEASE_BUILD)."
+            echo
+            echo "### Changes"
+            echo
+            if [[ -n "$PREVIOUS_TAG" ]]; then
+              git log --first-parent --format='- %s (`%h`)' "$PREVIOUS_TAG..$GITHUB_SHA"
+            else
+              git log --first-parent --max-count=20 --format='- %s (`%h`)' "$GITHUB_SHA"
+            fi
+          } > "$NOTES_PATH"
+
+          IPA_SIZE="$(stat -f '%z' "$IPA_PATH")"
+          RELEASE_DATE="$(git show -s --format=%cI "$GITHUB_SHA")"
+          mkdir -p "$RELEASE_ROOT" "$SITE_ROOT/ios"
+          python3 scripts/generate-ios-alt-source.py generate \
+            --base-source "$BASE_SOURCE" \
+            --output "$SOURCE_PATH" \
+            --version "$RELEASE_VERSION" \
+            --build-version "$RELEASE_BUILD" \
+            --release-date "$RELEASE_DATE" \
+            --ipa-size "$IPA_SIZE" \
+            --min-os-version "$MIN_OS_VERSION" \
+            --icon-url "$ICON_URL" \
+            --release-notes-file "$NOTES_PATH"
+          python3 scripts/generate-ios-alt-source.py validate "$SOURCE_PATH"
+
+          cp "$IPA_PATH" "$RELEASE_ROOT/MOOS.ipa"
+          cp "$SOURCE_PATH" "$RELEASE_ROOT/MOOS-alt-source.json"
+          cp "$NOTES_PATH" "$RELEASE_ROOT/release-notes.md"
+          cp distribution/ios/icon.png "$SITE_ROOT/ios/icon.png"
+          touch "$SITE_ROOT/.nojekyll"
+
+      - name: Summarize SideStore endpoint
+        env:
+          SOURCE_URL: ${{ steps.source-url.outputs.url }}
+        run: |
+          ADD_SOURCE_URI="$(python3 -c 'import sys, urllib.parse; print("sidestore://source?" + urllib.parse.urlencode({"url": sys.argv[1]}))' "$SOURCE_URL")"
+          {
+            echo "### SideStore update channel"
+            echo
+            echo "Source: $SOURCE_URL"
+            echo
+            echo "Add-source URI: $ADD_SOURCE_URI"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload validated release payload
+        uses: actions/upload-artifact@v7
+        with:
+          name: MOOS-iOS-release-payload
+          path: ${{ runner.temp }}/release-payload
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ${{ runner.temp }}/pages-site
+
+  publish-release:
+    needs:
+      - validate-release
+      - prepare-release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Recheck current default branch tip
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin \
+            "$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
+          DEFAULT_SHA="$(git rev-parse "origin/$DEFAULT_BRANCH")"
+          if [[ "$RELEASE_SHA" != "$DEFAULT_SHA" ]]; then
+            echo "Default branch advanced to $DEFAULT_SHA; refusing release for $RELEASE_SHA" >&2
+            exit 1
+          fi
+
+      - name: Download validated release payload
+        uses: actions/download-artifact@v8
+        with:
+          name: MOOS-iOS-release-payload
+          path: ${{ runner.temp }}/release-payload
+
+      - name: Validate release payload
+        env:
+          RELEASE_VERSION: ${{ needs.validate-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          PAYLOAD_ROOT="$RUNNER_TEMP/release-payload"
+          test -f "$PAYLOAD_ROOT/MOOS.ipa"
+          test -f "$PAYLOAD_ROOT/MOOS-alt-source.json"
+          test -s "$PAYLOAD_ROOT/release-notes.md"
+          python3 scripts/generate-ios-alt-source.py validate \
+            "$PAYLOAD_ROOT/MOOS-alt-source.json"
+          python3 - "$PAYLOAD_ROOT" "$RELEASE_VERSION" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          root = pathlib.Path(sys.argv[1])
+          version = sys.argv[2]
+          source = json.loads((root / "MOOS-alt-source.json").read_text())
+          latest = source["apps"][0]["versions"][0]
+          assert latest["version"] == version
+          assert latest["size"] == (root / "MOOS.ipa").stat().st_size
+          PY
+
+      - name: Publish immutable GitHub Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ needs.validate-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          PAYLOAD_ROOT="$RUNNER_TEMP/release-payload"
+          RELEASE_RECORD="$RUNNER_TEMP/draft-release.json"
+          DRAFT_CREATED=false
+          cleanup_draft() {
+            status=$?
+            trap - EXIT
+            if [[ "$DRAFT_CREATED" == true ]]; then
+              gh release delete "$RELEASE_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --yes || true
+            fi
+            exit "$status"
+          }
+          trap cleanup_draft EXIT
+
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release already exists for $RELEASE_TAG; refusing to replace assets" >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --draft \
+            --title "MOOS iOS $RELEASE_VERSION" \
+            --generate-notes \
+            --notes-file "$PAYLOAD_ROOT/release-notes.md"
+
+          DRAFT_CREATED=true
+          gh release upload "$RELEASE_TAG" \
+            "$PAYLOAD_ROOT/MOOS.ipa" \
+            "$PAYLOAD_ROOT/MOOS-alt-source.json" \
+            --repo "$GITHUB_REPOSITORY"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            > "$RELEASE_RECORD"
+          python3 - "$RELEASE_RECORD" "$PAYLOAD_ROOT" "$RELEASE_TAG" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          release = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          payload = pathlib.Path(sys.argv[2])
+          expected_tag = sys.argv[3]
+          assert release["draft"] is True
+          assert release["prerelease"] is False
+          assert release["tag_name"] == expected_tag
+          expected_assets = {
+              "MOOS.ipa": (payload / "MOOS.ipa").stat().st_size,
+              "MOOS-alt-source.json": (payload / "MOOS-alt-source.json").stat().st_size,
+          }
+          actual_assets = {asset["name"]: asset["size"] for asset in release["assets"]}
+          assert actual_assets == expected_assets
+          PY
+
+          # From here on, preserve an uncertain draft rather than risking deletion
+          # after GitHub may already have accepted the publication request.
+          DRAFT_CREATED=false
+          gh release edit "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false
+          trap - EXIT
+
+  deploy-alt-source:
+    needs:
+      - prepare-release
+      - publish-release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy stable AltSource to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
+
+      - name: Publish final SideStore URL
+        env:
+          SOURCE_URL: ${{ needs.prepare-release.outputs.source_url }}
+        run: |
+          ADD_SOURCE_URI="$(python3 -c 'import sys, urllib.parse; print("sidestore://source?" + urllib.parse.urlencode({"url": sys.argv[1]}))' "$SOURCE_URL")"
+          {
+            echo "### Published SideStore update channel"
+            echo
+            echo "Source: $SOURCE_URL"
+            echo
+            echo "Add-source URI: $ADD_SOURCE_URI"
+          } >> "$GITHUB_STEP_SUMMARY"

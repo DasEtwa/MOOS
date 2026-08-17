@@ -245,84 +245,197 @@ Status: Planned
 
 ## Slice I1 — Native iOS project foundation
 
-Goal: Add a native Swift/SwiftUI MOOS Mobile project with replaceable views.
+Goal: Add a native Swift/SwiftUI MOOS shell with replaceable presentation and
+mock-only client state.
 
-Prerequisites: M6 protocol shape; M8 is needed for live connectivity.
+Prerequisites: M6 protocol concepts. M7/M8 are not required for local UI work.
 
-Changes: branding, connection state, Host/Personal status, and placeholder
-Terminal/Files/Apps/Settings tiles. Only Terminal will eventually function.
+Changes: independent `ios/` Xcode project, client-facing Host/Personal/
+Connection/App models, mock state service, minimal MOOS Home, and placeholder
+Terminal/Files/Settings destinations.
 
-Tests: Xcode project validation and simulator build where available.
+Tests: source-boundary checks, Xcode project validation, unit tests and an
+unsigned simulator build where Xcode is available.
 
-Completion criteria: project opens/builds without embedding Host internals.
+Completion criteria: the project opens/builds without embedding Host runtime
+internals or implementing transport.
 
-Do not do yet: graphical streaming or final radial/ring navigation.
+Do not do yet: authentication, remote networking, streaming, or final visual
+navigation decisions.
 
-Status: Planned
+Status: Complete
+Implemented commit: `feat: add native iOS project foundation`
+Actual verification: `python3 tests/ios_client.py`,
+`python3 tests/protocol_contract.py`, `python3 tests/runtime_isolation.py`,
+Python compilation, shared-scheme XML validation, and `git diff --check` passed.
+The Linux development host does not have Swift or Xcode, so the unsigned
+simulator build is intentionally deferred to the macOS CI added in I4.
+Blockers: none
+Deviations: none
 
-## Slice I2 — GitHub Actions iOS build
+## Slice I2 — Native shell components
 
-Goal: Build unsigned simulator/app artifacts on macOS CI without local Mac
-requirements.
+Goal: Demonstrate the local MOOS desktop experience using cheap, reusable
+SwiftUI components and mock data.
 
 Prerequisites: I1 complete.
 
-Changes: workflow, dependency-free build verification, artifact documentation.
+Changes: widgets, app grid, MOOS tap menu, replaceable radial-menu prototype,
+and bottom system bar with non-destructive placeholders.
 
-Tests: GitHub Actions build; no signing secrets in Git.
+Tests: component/model unit tests, source-boundary checks, and an unsigned
+simulator build where Xcode is available.
 
-Completion criteria: CI can verify the project without Apple credentials.
+Completion criteria: Home visibly demonstrates desktop, widgets, apps, radial
+navigation, and system controls without streaming Linux UI.
 
-Status: Planned
+Status: Complete
+Implemented commit: `feat: build native MOOS shell prototype`
+Actual verification: `python3 tests/ios_client.py`,
+`python3 tests/protocol_contract.py`, `python3 tests/runtime_isolation.py`,
+Python compilation, shared-scheme XML validation, and `git diff --check` passed.
+The Linux development host has no Swift/Xcode toolchain, so simulator build and
+visual inspection remain deferred to I4 macOS CI and a later Apple device.
+Blockers: none
+Deviations: power and running-app actions intentionally display mock notices;
+they do not cross a service boundary.
 
-## Slice I3 — Mobile protocol client
+## Slice I3 — Cache and resilient state boundaries
 
-Goal: Implement the iPhone-side authenticated versioned client.
+Goal: Keep the local shell useful while remote state is unavailable or stale.
 
-Prerequisites: M6, M7, I1.
+Prerequisites: I2 complete.
 
-Changes: configured Host, protocol check, Host/Personal state, reconnect and
-clear offline/error states; credentials in Keychain.
+Changes: explicit local/cached/live data classes, local cache abstractions,
+mock/live service boundaries, reconnect/offline presentation, locally advanced
+uptime, and version-ready icon metadata.
 
-Tests: client protocol tests independent of SwiftUI.
+Tests: cache/service/state unit tests, source-boundary checks, and an unsigned
+simulator build where Xcode is available.
 
-Status: Planned
+Completion criteria: cached metadata remains visible during disconnects and
+live state can later be event-driven without changing SwiftUI views.
 
-## Slice I4 — Native MOOS Home
+Status: Complete
+Implemented commit: `feat: add resilient iOS state boundaries`
+Actual verification: `python3 tests/ios_client.py`,
+`python3 tests/protocol_contract.py`, `python3 tests/runtime_isolation.py`,
+Python compilation, shared-scheme XML validation, and `git diff --check` passed.
+Swift unit tests cover cache round trips, Protocol v1 request encoding, retained
+offline metadata, local preferences, and synchronized uptime; execution awaits
+the I4 macOS runner because Swift/Xcode is unavailable on this Linux host.
+Blockers: none
+Deviations: the live boundary is intentionally protocol-only; no M7/M8
+transport or authentication implementation was added.
 
-Goal: Render the first local/native MOOS shell on iPhone.
+## Slice I4 — GitHub Actions iOS build
+
+Goal: Verify the native shell on a GitHub-hosted macOS/Xcode runner without
+Apple signing credentials.
 
 Prerequisites: I3 complete.
 
-Changes: flexible Home view showing Personal, Host, connection quality and
-Terminal/Files/Apps/Settings entry points.
+Changes: dependency-free workflow, unchanged unsigned simulator build/test,
+separate unsigned physical-device build, arm64/iPhoneOS verification,
+`MOOS.ipa` artifact packaging, and build documentation.
 
-Tests: state rendering and offline/reconnect UI tests.
+Tests: workflow/static validation locally and GitHub Actions build after the
+commits are pushed.
 
-Do not do yet: hard-code radial navigation or stream a Linux desktop.
+Completion criteria: CI is configured to build and test the project with code
+signing disabled and no secrets, and separately produces an unsigned
+physical-device IPA only after verifying an iPhoneOS/arm64 executable.
 
-Status: Planned
+Status: Complete
+Implemented commits: `ci: verify iOS shell without signing`,
+`ci: package unsigned iPhoneOS app`, `ci: update device artifact uploader`
+Actual verification: `python3 tests/ios_client.py`, GitHub Actions YAML parsing,
+`python3 tests/protocol_contract.py`, `python3 tests/runtime_isolation.py`,
+Python compilation, shared-scheme XML validation, and `git diff --check` passed.
+GitHub Actions run `32058883408` on commit `8618281` passed both the unchanged
+simulator build/test job and the new unsigned device job. The device log records
+the `Release-iphoneos` product, `arm64-apple-ios17.0` target, and `platform IOS`;
+the uploaded `MOOS-unsigned-iphoneos-arm64` artifact contains `MOOS.ipa` with
+the standard `Payload/MOOSApp.app` layout.
+The workflow uses `macos-15`, Xcode 16.4, an iPhone 16 / iOS 18.5 simulator,
+`build-for-testing`, and `test-without-building` with code signing disabled. A
+separate Release build uses `iphoneos`, a generic iOS-device destination, and
+an explicit arm64 architecture; `lipo`, `vtool`, and the app's platform metadata
+must all confirm a physical-device product before `Payload/MOOSApp.app` is
+packaged and uploaded as `MOOS.ipa`.
+Blockers: none
+Deviations: the device IPA remains unsigned and cannot be installed until a
+future signing/provisioning phase; no signing material is stored in CI.
 
-## Slice I5 — Native Terminal / mobile MVP stop point
+## Slice I6 — GitHub Releases and SideStore OTA channel
 
-Goal: Connect SwiftUI Terminal to the real Personal terminal channel.
+Goal: Turn the already verified unsigned iPhoneOS build into an explicit,
+versioned SideStore update channel without moving signing into GitHub.
 
-Prerequisites: M8, I3, I4, and M5.
+Prerequisites: I4 complete. M7/M8 are not required because this slice changes
+distribution automation only and does not connect the app to a Host.
 
-Changes: keyboard, scrolling output, connect/disconnect/reconnect, monospace
-rendering, and basic ANSI support if practical.
+Changes: one canonical unsigned IPA packager/validator shared by normal and
+release CI, strict Xcode/tag and built-bundle validation, explicit `ios-v*`
+release workflow, immutable GitHub Release assets, deterministic Classic
+AltSource generation with version history, GitHub Pages publication, a
+committed distribution icon, generator tests, and release documentation.
 
-Tests: real iPhone runs `moos-info`, `moos-version`, and `moos-network` in the
-actual Personal guest; disconnect does not stop the guest.
+Tests: iOS distribution unit tests for tag/version/build parsing, Xcode metadata,
+bundle identity, semantic history order, immutable release URLs, malformed
+metadata, marketplace-field rejection, and workflow trigger/permission rules;
+existing client-boundary, simulator, unit, and unsigned device checks remain in
+the reusable normal workflow.
 
-Completion criteria: the real iPhone reaches Personal MOOS over Tailscale and
-shows `moos-info` output.
+Completion criteria: a tag at the current default-branch tip fails closed on
+any version, test, iPhoneOS/arm64, unsigned-bundle, IPA, source-history, or Pages
+preparation error; only the publish job can create the Release; SideStore can
+consume a stable Pages source whose versions point to immutable Release assets.
 
-Status: Planned
+Status: Implemented; real publication intentionally awaits an approved tag.
+Implemented commits: `build(ios): centralize unsigned IPA packaging`,
+`feat(ios): add deterministic AltSource tooling`,
+`ci(ios): add guarded release publishing`,
+`docs(ios): document the SideStore release channel`,
+`ci(ios): verify release assets before publication`, and
+`docs(ios): record release verification and recovery`.
+Actual local verification: all 15 `tests/ios_distribution.py` cases,
+`tests/ios_client.py`, `tests/moos_cli.py`, `tests/moosd_protocol.py`,
+`tests/personal_identity.py`, `tests/protocol_contract.py`,
+`tests/qemu_launcher.py`, `tests/runtime_control.py`, and
+`tests/runtime_isolation.py` passed. Real `tests/qemu_smoke.py` and
+`tests/qemu_terminal_bridge.py` boot/reconnect tests also passed. Shell/Python
+syntax checks, GitHub Actions YAML plus embedded-shell parsing, deterministic
+fixture AltSource generation/validation, and `git diff --check` passed.
+`tests/managed_personal.py` was not rerun: the unprivileged development session
+has no non-interactive sudo and its root-only Personal image staging is absent;
+this distribution-only slice does not change that runtime. The complete macOS
+simulator/device workflow will be observed after these commits are pushed.
+Manual prerequisite: enable **Settings → Pages → Build and deployment → Source:
+GitHub Actions** once. The repository Pages API currently returns no configured
+site, so no public source URL is claimed before that setting and the first real
+deployment.
+Security: normal CI is `contents: read`; only the tag-only Release job receives
+`contents: write`; Pages receives only its required scoped write/OIDC rights.
+There is no `pull_request_target`, PAT, Apple credential, certificate,
+provisioning profile, private key, signing step, live networking, or protocol
+change.
+Blockers: none in repository code. The first real tag/Release/Pages deployment
+was not performed because publication requires explicit approval.
+Deviations: none.
 
-STOP: After I5 succeeds on a real iPhone, stop and review the experience.
+## Deferred mobile integration — after M7/M8
 
-## Future roadmap — do not implement before I5 review
+- Add an authenticated Protocol v1 client only after M7 defines pairing,
+  credential storage, authorization, and revocation.
+- Add the Tailscale-carried remote transport only after M8 exposes a reviewed
+  authenticated endpoint; never proxy the current local socket directly.
+- Connect a native Terminal UI to the real Personal terminal only after those
+  boundaries pass real-device tests. Client disconnect must not stop Personal.
+- Review the native shell experiment before committing to radial navigation,
+  streaming, or broader application behavior.
+
+## Future roadmap — do not implement before deferred mobile integration review
 
 - F1 Native Files UI for Personal guest files only.
 - F2 Structured guest control service and typed Host↔Guest IPC.

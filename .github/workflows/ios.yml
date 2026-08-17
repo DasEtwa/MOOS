@@ -1,0 +1,118 @@
+name: iOS
+
+on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "ios/**"
+      - "distribution/ios/**"
+      - ".github/workflows/ios.yml"
+      - ".github/workflows/ios-release.yml"
+      - "scripts/build-ios-ipa.sh"
+      - "scripts/generate-ios-alt-source.py"
+      - "scripts/ios_release_metadata.py"
+      - "scripts/validate-ios-app.sh"
+      - "tests/ios_client.py"
+      - "tests/ios_distribution.py"
+  pull_request:
+    paths:
+      - "ios/**"
+      - "distribution/ios/**"
+      - ".github/workflows/ios.yml"
+      - ".github/workflows/ios-release.yml"
+      - "scripts/build-ios-ipa.sh"
+      - "scripts/generate-ios-alt-source.py"
+      - "scripts/ios_release_metadata.py"
+      - "scripts/validate-ios-app.sh"
+      - "tests/ios_client.py"
+      - "tests/ios_distribution.py"
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode 16.4
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Validate client boundaries
+        run: python3 tests/ios_client.py
+
+      - name: Validate distribution tooling
+        run: python3 tests/ios_distribution.py
+
+      - name: Build for iPhone simulator
+        run: |
+          xcodebuild \
+            -project ios/MOOSApp/MOOSApp.xcodeproj \
+            -scheme MOOSApp \
+            -configuration Debug \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.5' \
+            -derivedDataPath "$RUNNER_TEMP/MOOSDerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            build-for-testing
+
+      - name: Run unit tests
+        run: |
+          xcodebuild \
+            -project ios/MOOSApp/MOOSApp.xcodeproj \
+            -scheme MOOSApp \
+            -configuration Debug \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.5' \
+            -derivedDataPath "$RUNNER_TEMP/MOOSDerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            test-without-building
+
+  build-unsigned-device:
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode 16.4
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Build, verify, and package unsigned app for physical iPhone
+        env:
+          DEVICE_DERIVED_DATA: ${{ runner.temp }}/MOOSDeviceDerivedData
+          IPA_PATH: ${{ runner.temp }}/MOOS.ipa
+        run: |
+          ./scripts/build-ios-ipa.sh \
+            --derived-data "$DEVICE_DERIVED_DATA" \
+            --output "$IPA_PATH"
+
+      - name: Upload unsigned device IPA
+        uses: actions/upload-artifact@v7
+        with:
+          name: MOOS-unsigned-iphoneos-arm64
+          path: ${{ runner.temp }}/MOOS.ipa
+          if-no-files-found: error
+          retention-days: 14
