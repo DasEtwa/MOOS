@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import select
 import socket
 from dataclasses import asdict
 from pathlib import Path
@@ -46,6 +47,9 @@ class MoosdService:
                 return self._ok(operation, {"personal": asdict(self.runtime.start())})
             if operation == "personal.stop":
                 return self._ok(operation, {"personal": asdict(self.runtime.stop())})
+            if operation == "personal.terminal.open":
+                self.runtime.open_terminal()
+                return self._ok(operation, {"channel": "serial-console"})
             return self._error("unknown_operation", "operation is not supported")
         except AlreadyRunning:
             return self._error("already_running", "Personal is already running")
@@ -91,6 +95,8 @@ def serve(socket_path: Path, service: MoosdService) -> None:
                     else:
                         response = _decode_and_handle(request_bytes, service)
                     connection.sendall((json.dumps(response, separators=(",", ":")) + "\n").encode())
+                    if response.get("ok") and response.get("operation") == "personal.terminal.open":
+                        _serve_terminal(connection, service)
         finally:
             socket_path.unlink(missing_ok=True)
 
@@ -103,3 +109,43 @@ def _decode_and_handle(request_bytes: bytes, service: MoosdService) -> dict[str,
     if not isinstance(request, dict):
         return MoosdService._error("invalid_request", "request must be an object")
     return service.handle(request)
+
+
+def _serve_terminal(connection: socket.socket, service: MoosdService) -> None:
+    channel = service.runtime.open_terminal()
+    pending = b""
+    while True:
+        readable, _, _ = select.select([connection, channel], [], [], 0.25)
+        if connection in readable:
+            data = connection.recv(4096)
+            if not data:
+                return
+            pending += data
+            while b"\n" in pending:
+                line, pending = pending.split(b"\n", 1)
+                try:
+                    frame = json.loads(line.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    connection.sendall(b'{"type":"error","code":"invalid_frame"}\n')
+                    continue
+                if frame.get("type") == "input" and isinstance(frame.get("data"), str):
+                    channel.write(frame["data"].encode("utf-8"))
+                elif frame.get("type") == "close":
+                    return
+                else:
+                    try:
+                        connection.sendall(b'{"type":"error","code":"invalid_frame"}\n')
+                    except OSError:
+                        return
+        if channel in readable:
+            try:
+                output = channel.read()
+            except OSError:
+                return
+            if not output:
+                return
+            frame = {"type": "output", "data": output.decode("utf-8", errors="replace")}
+            try:
+                connection.sendall((json.dumps(frame, separators=(",", ":")) + "\n").encode("utf-8"))
+            except OSError:
+                return

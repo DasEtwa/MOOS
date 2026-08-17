@@ -8,11 +8,12 @@ paths, or execute arbitrary commands.
 from __future__ import annotations
 
 import os
+import pty
 import subprocess
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Callable
 
 
 PERSONAL_ID = "personal"
@@ -59,6 +60,28 @@ class SerialConnection:
     interactive: bool
 
 
+class TerminalChannel:
+    """A retained PTY master used only for guest serial-console bytes."""
+
+    def __init__(self, master_fd: int) -> None:
+        self.master_fd = master_fd
+
+    def fileno(self) -> int:
+        return self.master_fd
+
+    def read(self, size: int = 4096) -> bytes:
+        return os.read(self.master_fd, size)
+
+    def write(self, data: bytes) -> None:
+        os.write(self.master_fd, data)
+
+    def close(self) -> None:
+        try:
+            os.close(self.master_fd)
+        except OSError:
+            pass
+
+
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
 
@@ -76,6 +99,7 @@ class PersonalRuntime:
         self.run_instance = self.repo_root / "scripts" / "run-instance.sh"
         self._runner = runner or subprocess.run
         self._popen = popen or subprocess.Popen
+        self._terminal: TerminalChannel | None = None
 
     def _systemctl_state(self) -> RuntimeStatus:
         result = self._runner(
@@ -107,16 +131,24 @@ class PersonalRuntime:
         if not self.run_instance.is_file():
             raise RuntimeErrorBase(f"missing managed runner: {self.run_instance}")
 
-        self._popen(
-            [str(self.run_instance), "--id", PERSONAL_ID],
-            cwd=self.repo_root,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-            close_fds=True,
-            text=True,
-        )
+        master_fd, slave_fd = pty.openpty()
+        try:
+            self._popen(
+                [str(self.run_instance), "--id", PERSONAL_ID],
+                cwd=self.repo_root,
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                start_new_session=True,
+                close_fds=True,
+                text=True,
+            )
+        except BaseException:
+            os.close(master_fd)
+            raise
+        finally:
+            os.close(slave_fd)
+        self._terminal = TerminalChannel(master_fd)
         return RuntimeStatus(PERSONAL_ID, RuntimeState.STARTING)
 
     def stop(self) -> RuntimeStatus:
@@ -124,11 +156,11 @@ class PersonalRuntime:
         if current.state == RuntimeState.STOPPED:
             raise NotRunning(PERSONAL_ID)
         result = self._runner(
-            ["systemctl", "stop", UNIT_NAME],
-            capture_output=True,
-            text=True,
-            check=False,
+            ["systemctl", "stop", UNIT_NAME], capture_output=True, text=True, check=False
         )
+        if self._terminal is not None:
+            self._terminal.close()
+            self._terminal = None
         if result.returncode != 0:
             raise RuntimeErrorBase(result.stderr.strip() or "failed to stop Personal")
         return RuntimeStatus(PERSONAL_ID, RuntimeState.STOPPED)
@@ -142,6 +174,11 @@ class PersonalRuntime:
         status = self.status()
         return SerialConnection(
             kind="serial-console",
-            available=status.state == RuntimeState.RUNNING,
-            interactive=False,
+            available=status.state == RuntimeState.RUNNING and self._terminal is not None,
+            interactive=self._terminal is not None,
         )
+
+    def open_terminal(self) -> TerminalChannel:
+        if self.status().state != RuntimeState.RUNNING or self._terminal is None:
+            raise NotRunning(PERSONAL_ID)
+        return self._terminal

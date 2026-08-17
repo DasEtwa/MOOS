@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import select
 import socket
 import sys
 from pathlib import Path
@@ -43,8 +45,48 @@ def request(socket_path: Path, operation: str) -> dict:
     return json.loads(response.decode("utf-8"))
 
 
+def terminal(socket_path: Path) -> int:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.connect(str(socket_path))
+        connection.sendall(
+            (json.dumps({"protocolVersion": PROTOCOL_VERSION, "operation": "personal.terminal.open"}) + "\n").encode()
+        )
+        acknowledgment = json.loads(connection.recv(16 * 1024).decode("utf-8"))
+        if not acknowledgment.get("ok"):
+            error = acknowledgment.get("error", {})
+            print(f"moos: {error.get('code', 'error')}: {error.get('message', 'request failed')}", file=sys.stderr)
+            return 1
+        while True:
+            readable, _, _ = select.select([sys.stdin, connection], [], [])
+            if sys.stdin in readable:
+                data = os.read(sys.stdin.fileno(), 4096)
+                if not data:
+                    connection.sendall(b'{"type":"close"}\n')
+                    return 0
+                frame = {"type": "input", "data": data.decode("utf-8", errors="replace")}
+                connection.sendall((json.dumps(frame, separators=(",", ":")) + "\n").encode())
+            if connection in readable:
+                data = connection.recv(16 * 1024)
+                if not data:
+                    return 0
+                for line in data.splitlines():
+                    frame = json.loads(line.decode("utf-8"))
+                    if frame.get("type") == "output":
+                        sys.stdout.write(frame.get("data", ""))
+                        sys.stdout.flush()
+                    elif frame.get("type") == "error":
+                        print(f"moos: terminal error: {frame.get('code', 'error')}", file=sys.stderr)
+                        return 1
+
+
 def main() -> int:
     args = parse_args()
+    if args.command == "personal" and args.action == "terminal":
+        try:
+            return terminal(args.socket)
+        except OSError as error:
+            print(f"moos: daemon connection failed: {error}", file=sys.stderr)
+            return 1
     try:
         operation = operation_for(args)
         response = request(args.socket, operation)

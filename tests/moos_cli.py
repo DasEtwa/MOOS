@@ -28,11 +28,28 @@ class FakeRuntime:
     def stop(self):
         return RuntimeStatus("personal", RuntimeState.STOPPED)
 
+    def open_terminal(self):
+        return FakeChannel()
 
-def run_cli(socket_path, *arguments):
+
+class FakeChannel:
+    def __init__(self):
+        self.fd, self.write_fd = os.pipe()
+
+    def fileno(self):
+        return self.fd
+
+    def read(self, size=4096):
+        return b""
+
+    def write(self, data):
+        return os.write(self.write_fd, data)
+
+
+def run_cli(socket_path, *arguments, input_text=None):
     return subprocess.run(
         [str(REPO_ROOT / "scripts/moos"), "--socket", str(socket_path), *arguments],
-        cwd=REPO_ROOT, capture_output=True, text=True, check=False,
+        cwd=REPO_ROOT, capture_output=True, text=True, input=input_text, check=False,
     )
 
 
@@ -54,9 +71,8 @@ def main():
         stop = run_cli(socket_path, "personal", "stop")
         assert stop.returncode == 0, stop.stderr
 
-        terminal = run_cli(socket_path, "personal", "terminal")
-        assert terminal.returncode == 2
-        assert "after M5" in terminal.stderr
+        terminal = run_cli(socket_path, "personal", "terminal", input_text="")
+        assert terminal.returncode == 0, terminal.stderr
 
         direct_qemu = REPO_ROOT / "scripts" / "run-qemu.sh"
         assert "run-qemu" not in Path(REPO_ROOT / "scripts/moos").read_text()
@@ -64,7 +80,7 @@ def main():
 
     print("MOOS local CLI test: PASS")
     print("  status/start/stop use moosd: ok")
-    print("  terminal placeholder is explicit until M5: ok")
+    print("  terminal command opens the daemon channel: ok")
     print("  CLI contains no QEMU lifecycle logic: ok")
     return 0
 

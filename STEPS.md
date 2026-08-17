@@ -142,7 +142,16 @@ Completion criteria: `MOOS Linux` and `# moos-info` work through the local bridg
 
 Do not do yet: graphical streaming or arbitrary host shell execution.
 
-Status: Planned
+Status: In Progress
+Implemented commit: `feat: bridge Personal terminal through moosd`
+Actual verification: PTY bridge tests, CLI bridge test, all existing policy,
+launcher, identity, runtime-control, and QEMU smoke tests pass. The managed
+QEMU terminal path has not yet been run end-to-end because this checkout has
+no staged `/var/lib/moos/instances/personal` and activation requires explicit
+administrator authorization.
+Blockers: real managed Personal staging/start is required before M5 can be
+marked Complete; no sudo password is requested or stored.
+Deviations: none
 
 ## Slice M6 — Versioned protocol
 

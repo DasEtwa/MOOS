@@ -60,7 +60,7 @@ def main():
     assert runtime.status().state == RuntimeState.RUNNING
     assert runtime.serial_connection().kind == "serial-console"
     assert runtime.serial_connection().available is True
-    assert runtime.serial_connection().interactive is False
+    assert runtime.serial_connection().interactive is True
 
     try:
         runtime.start()
