@@ -134,6 +134,15 @@ Add only small utilities that make the minimal system easier to operate.
 
 ## Phase 3 — Host/guest isolation
 
+Status: the default serial QEMU launcher uses a rootless bubblewrap
+user/mount/PID/IPC namespace, TCG, bounded default memory/CPU, a temporary
+rootfs snapshot, no shared folders or host devices, and deny-by-default
+networking. The repository also contains a deliberate Phase 3.1 activation
+path for a locked `moos-runtime` account, private Instance staging, and
+systemd/cgroup-v2 CPU, RAM, PID, and I/O limits. That path was activated and
+tested on one Kubuntu host; persistent Instance metadata and a typed host/guest
+IPC channel remain open work.
+
 ### Goal
 
 Define and enforce safe boundaries before MOOS controls anything outside the
@@ -146,8 +155,11 @@ guest.
 
 ### Concrete tasks
 
-- Use a dedicated unprivileged host user where practical.
+- Activate `scripts/setup-runtime-user.sh` after reviewing its dry-run.
+- Stage an Instance outside the developer checkout with `stage-instance.sh`.
+- Start it through `run-instance.sh` and inspect the resulting systemd cgroup.
 - Define minimal QEMU permissions and device access.
+- Keep CPU, memory, task, and I/O budgets explicit per Instance.
 - Define controlled shared directories, if one is actually needed.
 - Choose safe IPC boundaries and validate all messages.
 - Add negative tests for path traversal and unauthorized operations.
@@ -160,7 +172,15 @@ guest.
 
 ### Tests and checks
 
+- Run `python3 tests/qemu_launcher.py` to inspect deny-by-default launcher
+  behavior and rejection paths.
+- Run `python3 tests/runtime_isolation.py` to inspect the account, staging, and
+  cgroup policy without modifying the host.
+- Run the QEMU smoke test with explicit user networking and with networking
+  disabled (`MOOS_TEST_NETWORK=user|none`).
 - Inspect QEMU command-line permissions and devices.
+- Inspect `systemctl status moos-instance-<id>.service` while a managed Instance
+  is running and verify its cgroup limits.
 - Test access to allowed and denied paths.
 - Test process cleanup after guest or host failure.
 
@@ -168,6 +188,8 @@ guest.
 
 - Do not implement a host API that runs arbitrary commands as root.
 - Do not treat a private network as sufficient authorization.
+- Do not run the privileged setup automatically from a build or guest script.
+- Do not add shared folders, device passthrough, or host credentials to staging.
 
 ## Phase 4 — moosd
 

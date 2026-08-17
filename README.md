@@ -16,7 +16,7 @@ Verified baseline:
 - BusyBox 1.38.0
 - root shell on the serial console
 - QEMU boot
-- DHCP networking through QEMU user-mode networking
+- DHCP networking through explicitly enabled QEMU user-mode networking
 - roughly 5.7 MiB used in the root filesystem
 - a 60 MiB ext2 image with roughly 55.1 MiB usable space
 - a dynamic green login banner with kernel, RAM, uptime, IP, and rootfs data
@@ -32,9 +32,16 @@ streaming are not implemented yet. Their interfaces must remain replaceable.
 | configs/ | Tracked Buildroot configuration used for the MOOS QEMU image |
 | scripts/build.sh | Fetches the pinned Buildroot revision and builds MOOS |
 | scripts/run-qemu.sh | Portable QEMU launcher for the generated image |
+| scripts/setup-runtime-user.sh | One-time root setup for the locked moos-runtime account |
+| scripts/stage-instance.sh | Atomically stages kernel/rootfs files outside the repository |
+| scripts/run-instance.sh | Starts a staged Instance in a systemd cgroup |
 | tests/qemu_smoke.py | Host-side boot, login, utility, network, and shutdown smoke test |
+| tests/qemu_launcher.py | Host-side checks for isolated QEMU defaults and rejection paths |
+| tests/runtime_isolation.py | Host-side checks for Phase 3.1 account and cgroup policy |
 | system/overlay/ | Files copied into the guest root filesystem |
 | AGENTS.md | Development rules for coding agents |
+| rules.md | Project-wide design and contribution rules |
+| HOST_GUEST_ISOLATION.md | Current host/guest boundary and remaining Phase 3 work |
 | BUG_AUDIT.md | Evidence-based baseline audit |
 | STEPS.md | Incremental development roadmap |
 
@@ -44,10 +51,11 @@ output/, and host-tools/.
 
 ## Build
 
-Use a Linux development host with Git, GNU make, a working C toolchain, and the
-host packages required by Buildroot. The first build downloads and compiles the
-toolchain, kernel, BusyBox, host QEMU, and the root filesystem. It can take
-substantially longer than incremental builds and may use about 14 GB locally.
+Use a Linux development host with Git, GNU make, bubblewrap, systemd with
+unified cgroup v2, a working C toolchain, and the host packages required by
+Buildroot. The first build downloads and compiles the toolchain, kernel,
+BusyBox, host QEMU, and the root filesystem. It can take substantially longer
+than incremental builds and may use about 14 GB locally.
 
 From the repository root:
 
@@ -72,37 +80,112 @@ MOOS, move the relevant configuration or source into a tracked repository path.
 
 ## Run in QEMU
 
-For the console view and login banner:
+For the isolated console view and login banner:
 
 ~~~bash
 ./scripts/run-qemu.sh --serial-only
 ~~~
 
-Wait for moos login:, enter root, and leave the password empty. This
+Networking is disabled by default. To explicitly enable the current controlled
+QEMU user-mode NAT for development:
+
+~~~bash
+./scripts/run-qemu.sh --serial-only --network user
+~~~
+
+Wait for `moos login:`, enter root, and leave the password empty. This
 blank-password root account is intentional for the current local development
 image only; the image must not be exposed as a remote service.
 
 To launch the QEMU graphical window while keeping the serial console in the
-terminal:
+terminal, explicitly bypass the rootless sandbox:
 
 ~~~bash
-./scripts/run-qemu.sh
+./scripts/run-qemu.sh --direct --network user
 ~~~
 
-Stop the serial-only session with Ctrl+A, then X.
+`--direct` is a development escape hatch and is not the host/guest security
+boundary. Do not use it for an untrusted or compromised guest. Stop the
+serial-only session with Ctrl+A, then X.
+
+## Host/guest isolation
+
+The default serial launcher runs QEMU in a rootless bubblewrap sandbox. It does
+not bind the repository, home directories, host secrets, host devices, shared
+folders, or host sockets. It uses TCG instead of KVM, one vCPU, 256 MiB of RAM,
+and a temporary snapshot of the 60 MiB root filesystem image.
+
+Inspect the effective defaults without starting QEMU:
+
+~~~bash
+./scripts/run-qemu.sh --serial-only --dry-run
+~~~
+
+The current boundary and remaining Phase 3 work are documented in
+HOST_GUEST_ISOLATION.md. This is a rootless local QEMU baseline; a dedicated
+host runtime user, host-level cgroups, persistent Instance metadata, and
+`moosd` are not part of the plain developer launcher.
+
+### Phase 3.1 managed runtime
+
+Phase 3.1 adds a separate host account and a cgroup-enforced launch path. First
+inspect the privileged setup; this dry-run does not change the host:
+
+~~~bash
+./scripts/setup-runtime-user.sh --dry-run
+python3 tests/runtime_isolation.py
+~~~
+
+After reviewing it, an administrator can install the locked `moos-runtime`
+account and private storage once:
+
+~~~bash
+sudo ./scripts/setup-runtime-user.sh --source-root "$PWD"
+sudo ./scripts/stage-instance.sh --id luna --image-dir "$PWD/output/images"
+~~~
+
+The account uses `nologin`, is locked, has no supplementary groups, and has no
+access path to the developer checkout. The staged Instance contains only the
+kernel and root filesystem; those files and the copied QEMU runtime are
+root-owned and read-only to `moos-runtime`.
+
+Run the managed example with automatic I/O-device detection:
+
+~~~bash
+sudo ./scripts/run-instance.sh --id luna
+~~~
+
+This creates a transient systemd service for `moos-runtime` with a 200% CPU
+quota, 2 GiB cgroup memory limit, 512 host tasks, 10 MB/s read/write I/O
+limits, 1792 MiB guest memory, two vCPUs, no network, private devices, and
+`ProtectHome=yes`. If the storage device cannot be detected, provide it
+explicitly with `--io-device /dev/...`. The runtime account itself never gets
+sudo or login access. Use `sudo systemctl stop moos-instance-luna.service` from
+another terminal to stop a running managed session.
+
+The managed path requires deliberate root authorization and is separate from
+the normal developer launcher. It does not expose an arbitrary host command
+argument or a remote API.
 
 ## Phase 1/2 smoke test
 
-After building, run the standard host-side smoke test:
+After building, validate the launcher policy and then run the standard host-side
+smoke test:
 
 ~~~bash
+python3 tests/runtime_isolation.py
+python3 tests/qemu_launcher.py
 python3 tests/qemu_smoke.py
 ~~~
 
-The test boots QEMU through the tracked launcher, waits for the login prompt,
-checks the banner, kernel, BusyBox, RAM, uptime, /proc, /sys, DHCP, rootfs
-space, and writable /tmp. It also exercises the four MOOS utilities, reboots the
-guest, and verifies a clean poweroff and QEMU exit.
+The runtime policy test checks the dedicated account plan, private staging,
+systemd cgroup values, host protections, and invalid input rejection. The
+launcher test checks deny-by-default networking, resource limits, the rootless
+sandbox, and invalid option rejection. The QEMU test boots through the
+isolated launcher with explicit user-mode networking, waits for the login
+prompt, checks the banner, kernel, BusyBox, RAM, uptime, /proc, /sys, DHCP,
+rootfs space, and writable /tmp. It also exercises the four MOOS utilities,
+reboots the guest, and verifies a clean poweroff and QEMU exit.
 
 ## MOOS utilities
 
@@ -145,5 +228,6 @@ Future host services and remote APIs must be designed around explicit,
 authenticated, least-privilege operations. Tailscale may provide transport
 reachability later, but it is not application authentication.
 
-See AGENTS.md for contribution rules, BUG_AUDIT.md for known findings, and
-STEPS.md for the next milestones.
+See AGENTS.md and rules.md for contribution rules, BUG_AUDIT.md for known
+findings, HOST_GUEST_ISOLATION.md for the security boundary, and STEPS.md for
+the next milestones.
