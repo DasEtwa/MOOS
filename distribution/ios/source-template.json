@@ -1,0 +1,26 @@
+{
+  "name": "MOOS",
+  "subtitle": "Remote state, local experience.",
+  "description": "Native iPhone shell for a Personal MOOS system.",
+  "tintColor": "#37E68A",
+  "featuredApps": [
+    "dev.moos.shell"
+  ],
+  "apps": [
+    {
+      "name": "MOOS",
+      "bundleIdentifier": "dev.moos.shell",
+      "developerName": "DasEtwa",
+      "subtitle": "Your Personal MOOS shell.",
+      "localizedDescription": "A native SwiftUI shell for MOOS. Linux-specific state will connect through the authenticated MOOS protocol in a later phase.",
+      "tintColor": "#37E68A",
+      "category": "utilities",
+      "versions": [],
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {}
+      }
+    }
+  ],
+  "news": []
+}
