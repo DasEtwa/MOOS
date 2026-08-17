@@ -40,9 +40,14 @@ pairing, credential, or live backend client in this project.
 
 `.github/workflows/ios.yml` selects Xcode 16.4 on a GitHub-hosted `macos-15`
 runner, builds for the iPhone 16 / iOS 18.5 simulator, and then runs the unit
-tests without rebuilding. Both commands disable code signing. The workflow uses
-no Apple certificates, provisioning profiles, signing secrets, package manager,
-or third-party dependency bootstrap.
+tests without rebuilding. A separate job builds the Release app against the
+physical-device `iphoneos` SDK with an arm64-only executable, verifies its
+Mach-O platform is `IOS` rather than `IOSSIMULATOR`, and packages
+`Payload/MOOSApp.app` as the `MOOS.ipa` workflow artifact. All build commands
+disable code signing. The workflow uses no Apple certificates, provisioning
+profiles, signing secrets, package manager, or third-party dependency bootstrap.
+The resulting IPA is a standard bundle artifact for inspection and later
+signing; it cannot be installed on an iPhone until it is signed and provisioned.
 
 The equivalent project and scheme are:
 

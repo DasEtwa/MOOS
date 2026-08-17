@@ -64,3 +64,80 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             COMPILER_INDEX_STORE_ENABLE=NO \
             test-without-building
+
+  build-unsigned-device:
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode 16.4
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Build unsigned app for physical iPhone
+        env:
+          DEVICE_DERIVED_DATA: ${{ runner.temp }}/MOOSDeviceDerivedData
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project ios/MOOSApp/MOOSApp.xcodeproj \
+            -scheme MOOSApp \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$DEVICE_DERIVED_DATA" \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            build
+
+      - name: Verify device binary and package IPA
+        env:
+          DEVICE_DERIVED_DATA: ${{ runner.temp }}/MOOSDeviceDerivedData
+          IPA_PATH: ${{ runner.temp }}/MOOS.ipa
+          PACKAGE_ROOT: ${{ runner.temp }}/MOOSIPAPackage
+        run: |
+          set -euo pipefail
+          APP_PATH="$DEVICE_DERIVED_DATA/Build/Products/Release-iphoneos/MOOSApp.app"
+          APP_BINARY="$APP_PATH/MOOSApp"
+
+          test -d "$APP_PATH"
+          test -x "$APP_BINARY"
+
+          ARCHITECTURES="$(xcrun lipo -archs "$APP_BINARY")"
+          test "$ARCHITECTURES" = "arm64"
+
+          xcrun vtool -show-build "$APP_BINARY" | tee "$RUNNER_TEMP/MOOS-device-build.txt"
+          grep -Eq '^[[:space:]]*platform IOS$' "$RUNNER_TEMP/MOOS-device-build.txt"
+          if grep -Eq '^[[:space:]]*platform IOSSIMULATOR$' "$RUNNER_TEMP/MOOS-device-build.txt"; then
+            echo "Refusing to package a simulator binary" >&2
+            exit 1
+          fi
+
+          PLATFORM_NAME="$(/usr/libexec/PlistBuddy -c 'Print :DTPlatformName' "$APP_PATH/Info.plist")"
+          test "$PLATFORM_NAME" = "iphoneos"
+
+          mkdir -p "$PACKAGE_ROOT/Payload"
+          cp -R "$APP_PATH" "$PACKAGE_ROOT/Payload/MOOSApp.app"
+          cd "$PACKAGE_ROOT"
+          /usr/bin/zip -qry "$IPA_PATH" Payload
+          /usr/bin/unzip -t "$IPA_PATH"
+          /usr/bin/unzip -Z1 "$IPA_PATH" > "$RUNNER_TEMP/MOOS-ipa-contents.txt"
+          grep -Fxq 'Payload/MOOSApp.app/MOOSApp' "$RUNNER_TEMP/MOOS-ipa-contents.txt"
+
+      - name: Upload unsigned device IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: MOOS-unsigned-iphoneos-arm64
+          path: ${{ runner.temp }}/MOOS.ipa
+          if-no-files-found: error
+          retention-days: 14

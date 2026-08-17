@@ -335,26 +335,35 @@ Apple signing credentials.
 
 Prerequisites: I3 complete.
 
-Changes: dependency-free workflow, unsigned simulator build/test, and build
-documentation.
+Changes: dependency-free workflow, unchanged unsigned simulator build/test,
+separate unsigned physical-device build, arm64/iPhoneOS verification,
+`MOOS.ipa` artifact packaging, and build documentation.
 
 Tests: workflow/static validation locally and GitHub Actions build after the
 commits are pushed.
 
 Completion criteria: CI is configured to build and test the project with code
-signing disabled and no secrets.
+signing disabled and no secrets, and separately produces an unsigned
+physical-device IPA only after verifying an iPhoneOS/arm64 executable.
 
-Status: Implemented; awaiting first hosted run
-Implemented commit: `ci: verify iOS shell without signing`
+Status: Implemented; device artifact awaiting first hosted run
+Implemented commits: `ci: verify iOS shell without signing`,
+`ci: package unsigned iPhoneOS app`
 Actual verification: `python3 tests/ios_client.py`, GitHub Actions YAML parsing,
 `python3 tests/protocol_contract.py`, `python3 tests/runtime_isolation.py`,
 Python compilation, shared-scheme XML validation, and `git diff --check` passed.
+Both hosted simulator build/test runs for PR #3 passed before the device job was
+added.
 The workflow uses `macos-15`, Xcode 16.4, an iPhone 16 / iOS 18.5 simulator,
-`build-for-testing`, and `test-without-building` with code signing disabled.
-Blockers: the hosted Xcode build cannot run until these local commits are pushed
-or opened as a pull request. No build success is claimed yet.
-Deviations: no build artifact is uploaded; build and test verification are the
-only initial CI outputs.
+`build-for-testing`, and `test-without-building` with code signing disabled. A
+separate Release build uses `iphoneos`, a generic iOS-device destination, and
+an explicit arm64 architecture; `lipo`, `vtool`, and the app's platform metadata
+must all confirm a physical-device product before `Payload/MOOSApp.app` is
+packaged and uploaded as `MOOS.ipa`.
+Blockers: the new physical-device job cannot run until its commit is pushed.
+No device-build or IPA-artifact success is claimed yet.
+Deviations: the device IPA remains unsigned and cannot be installed until a
+future signing/provisioning phase; no signing material is stored in CI.
 
 ## Deferred mobile integration — after M7/M8
 

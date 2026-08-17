@@ -85,6 +85,27 @@ def main() -> None:
         "test-without-building",
     ):
         assert requirement in workflow_text, f"iOS CI is missing {requirement}"
+
+    for device_requirement in (
+        "build-unsigned-device:",
+        "-sdk iphoneos",
+        "-destination 'generic/platform=iOS'",
+        "Release-iphoneos/MOOSApp.app",
+        "ARCHS=arm64",
+        "xcrun lipo -archs",
+        "xcrun vtool -show-build",
+        "platform IOS$",
+        "platform IOSSIMULATOR$",
+        "DTPlatformName",
+        'test "$PLATFORM_NAME" = "iphoneos"',
+        "Payload/MOOSApp.app",
+        "MOOS.ipa",
+        "actions/upload-artifact@v4",
+        "MOOS-unsigned-iphoneos-arm64",
+    ):
+        assert device_requirement in workflow_text, (
+            f"iOS device CI is missing {device_requirement}"
+        )
     assert "secrets." not in workflow_text.lower()
     assert "brew " not in workflow_text.lower()
 
@@ -92,7 +113,7 @@ def main() -> None:
     print(f"  Swift sources referenced by project: {len(swift_sources)}")
     print("  host implementation details absent from client: ok")
     print("  third-party dependencies: none")
-    print("  unsigned macOS/Xcode CI workflow: configured")
+    print("  unsigned simulator and arm64 iPhoneOS CI: configured")
 
 
 if __name__ == "__main__":
