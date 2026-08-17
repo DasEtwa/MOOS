@@ -29,7 +29,7 @@ The release workflow:
 6. generates and validates a SideStore-compatible AltSource while preserving
    the previous source history from the latest semantic iOS Release;
 7. creates the immutable GitHub Release with `MOOS.ipa` and
-   `MOOS-alt-source.json`; and
+   `MOOS-alt-source.json` only after verifying both assets in a draft; and
 8. deploys the stable `ios/source.json` and `ios/icon.png` through GitHub
    Pages.
 
@@ -128,6 +128,20 @@ ordering ambiguous and is intentionally rejected.
 If the Release succeeds but the Pages deployment fails, use GitHub Actions'
 **Re-run failed jobs** operation. The successfully prepared Pages artifact and
 immutable Release do not need to be replaced.
+
+An interrupted publish job can conservatively leave an unpublished draft when
+GitHub's response is uncertain. Confirm that it is a draft before removing it,
+never delete its tag, and then re-run the release workflow jobs:
+
+```bash
+gh release view ios-v0.1.1 --repo DasEtwa/MOOS \
+  --json isDraft,tagName,url
+# Only when isDraft is true:
+gh release delete ios-v0.1.1 --repo DasEtwa/MOOS --yes
+```
+
+A published Release is immutable for this pipeline and must not be deleted or
+replaced as a retry mechanism.
 
 ## AltSource maintenance
 

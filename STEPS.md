@@ -395,13 +395,22 @@ consume a stable Pages source whose versions point to immutable Release assets.
 Status: Implemented; real publication intentionally awaits an approved tag.
 Implemented commits: `build(ios): centralize unsigned IPA packaging`,
 `feat(ios): add deterministic AltSource tooling`,
-`ci(ios): add guarded release publishing`, and
-`docs(ios): document the SideStore release channel`.
-Actual local verification: `python3 tests/ios_distribution.py`,
-`python3 tests/ios_client.py`, shell/Python syntax checks, GitHub Actions YAML
-parsing, deterministic fixture AltSource generation/validation, and
-`git diff --check` passed. The complete macOS simulator/device workflow will be
-observed after these commits are pushed.
+`ci(ios): add guarded release publishing`,
+`docs(ios): document the SideStore release channel`,
+`ci(ios): verify release assets before publication`, and
+`docs(ios): record release verification and recovery`.
+Actual local verification: all 15 `tests/ios_distribution.py` cases,
+`tests/ios_client.py`, `tests/moos_cli.py`, `tests/moosd_protocol.py`,
+`tests/personal_identity.py`, `tests/protocol_contract.py`,
+`tests/qemu_launcher.py`, `tests/runtime_control.py`, and
+`tests/runtime_isolation.py` passed. Real `tests/qemu_smoke.py` and
+`tests/qemu_terminal_bridge.py` boot/reconnect tests also passed. Shell/Python
+syntax checks, GitHub Actions YAML plus embedded-shell parsing, deterministic
+fixture AltSource generation/validation, and `git diff --check` passed.
+`tests/managed_personal.py` was not rerun: the unprivileged development session
+has no non-interactive sudo and its root-only Personal image staging is absent;
+this distribution-only slice does not change that runtime. The complete macOS
+simulator/device workflow will be observed after these commits are pushed.
 Manual prerequisite: enable **Settings → Pages → Build and deployment → Source:
 GitHub Actions** once. The repository Pages API currently returns no configured
 site, so no public source URL is claimed before that setting and the first real
