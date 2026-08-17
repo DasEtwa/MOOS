@@ -39,6 +39,11 @@ def main() -> None:
         "RadialMenuView.swift",
         "PowerMenuView.swift",
         "SystemBarView.swift",
+        "ConnectionBannerView.swift",
+        "LocalShellPreferences.swift",
+        "RemoteMetadataCache.swift",
+        "LiveMOOSStateProviding.swift",
+        "MOOSProtocolV1.swift",
     }
     assert component_sources <= {source.name for source in swift_sources}
 
@@ -48,6 +53,8 @@ def main() -> None:
         "bubblewrap",
         "/var/lib/moos",
         "console.sock",
+        "urlsession",
+        "nwconnection",
     )
     combined_sources = "\n".join(source.read_text().lower() for source in swift_sources)
     for detail in forbidden_client_details:
@@ -57,6 +64,11 @@ def main() -> None:
     assert ".contextmenu" in combined_sources
     assert "timelineview" in combined_sources
     assert "mock controls" in combined_sources
+    assert "asyncstream" in combined_sources
+    assert "contenthash" in combined_sources
+    assert "options: .atomic" in combined_sources
+    assert "cached desktop remains available" in combined_sources
+    assert "static let version = 1" in combined_sources
 
     assert not list(IOS_ROOT.rglob("Package.resolved")), "unexpected dependency lockfile"
     print("MOOS iOS client structure test: PASS")

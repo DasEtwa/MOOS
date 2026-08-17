@@ -1,3 +1,3 @@
 protocol MOOSStateProviding: Sendable {
-    func homeSnapshot() async -> HomeSnapshot
+    func snapshots() -> AsyncStream<HomeSnapshot>
 }

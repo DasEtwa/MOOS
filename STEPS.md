@@ -316,7 +316,17 @@ simulator build where Xcode is available.
 Completion criteria: cached metadata remains visible during disconnects and
 live state can later be event-driven without changing SwiftUI views.
 
-Status: Planned
+Status: Complete
+Implemented commit: `feat: add resilient iOS state boundaries`
+Actual verification: `python3 tests/ios_client.py`,
+`python3 tests/protocol_contract.py`, `python3 tests/runtime_isolation.py`,
+Python compilation, shared-scheme XML validation, and `git diff --check` passed.
+Swift unit tests cover cache round trips, Protocol v1 request encoding, retained
+offline metadata, local preferences, and synchronized uptime; execution awaits
+the I4 macOS runner because Swift/Xcode is unavailable on this Linux host.
+Blockers: none
+Deviations: the live boundary is intentionally protocol-only; no M7/M8
+transport or authentication implementation was added.
 
 ## Slice I4 — GitHub Actions iOS build
 

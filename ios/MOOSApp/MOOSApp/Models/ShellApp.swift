@@ -1,4 +1,4 @@
-enum ShellDestination: Hashable, Sendable {
+enum ShellDestination: String, Codable, Hashable, Sendable {
     case blender
     case discord
     case terminal
@@ -9,9 +9,18 @@ enum ShellDestination: Hashable, Sendable {
     case settings
 }
 
-struct ShellApp: Identifiable, Equatable, Sendable {
+struct AppIconMetadata: Codable, Equatable, Sendable {
+    let fallbackSymbolName: String
+    let contentHash: String?
+}
+
+struct ShellApp: Identifiable, Codable, Equatable, Sendable {
     let id: String
     let name: String
-    let symbolName: String
+    let icon: AppIconMetadata
     let destination: ShellDestination
+
+    var symbolName: String {
+        icon.fallbackSymbolName
+    }
 }

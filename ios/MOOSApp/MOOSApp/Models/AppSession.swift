@@ -1,9 +1,9 @@
-enum AppSessionState: Equatable, Sendable {
+enum AppSessionState: String, Codable, Equatable, Sendable {
     case active
     case background
 }
 
-struct AppSession: Identifiable, Equatable, Sendable {
+struct AppSession: Identifiable, Codable, Equatable, Sendable {
     let id: String
     let applicationID: String
     let displayName: String

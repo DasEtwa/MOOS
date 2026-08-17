@@ -1,4 +1,4 @@
-enum PersonalSystemState: String, Equatable, Sendable {
+enum PersonalSystemState: String, Codable, Equatable, Sendable {
     case starting
     case running
     case stopping
@@ -24,7 +24,7 @@ enum PersonalSystemState: String, Equatable, Sendable {
     }
 }
 
-struct PersonalSystem: Identifiable, Equatable, Sendable {
+struct PersonalSystem: Identifiable, Codable, Equatable, Sendable {
     let id: String
     let displayName: String
     let state: PersonalSystemState

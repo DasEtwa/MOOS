@@ -2,13 +2,18 @@ import SwiftUI
 
 struct MOOSHomeView: View {
     @StateObject private var viewModel: HomeViewModel
+    @StateObject private var settingsViewModel: SettingsViewModel
     @State private var navigationPath = NavigationPath()
     @State private var isPowerMenuVisible = false
     @State private var isRadialMenuVisible = false
     @State private var notice: ShellNotice?
 
-    init(viewModel: @autoclosure @escaping () -> HomeViewModel) {
+    init(
+        viewModel: @autoclosure @escaping () -> HomeViewModel,
+        settingsViewModel: @autoclosure @escaping () -> SettingsViewModel
+    ) {
         _viewModel = StateObject(wrappedValue: viewModel())
+        _settingsViewModel = StateObject(wrappedValue: settingsViewModel())
     }
 
     var body: some View {
@@ -20,7 +25,17 @@ struct MOOSHomeView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 26) {
                             HomeHeader(snapshot: viewModel.snapshot)
-                            PersonalSystemCard(system: viewModel.snapshot.personalSystem)
+                            if viewModel.snapshot.connectionState != .connected {
+                                ConnectionBannerView(
+                                    state: viewModel.snapshot.connectionState,
+                                    lastSynchronizedAt: viewModel.snapshot.lastSynchronizedAt,
+                                    isShowingCachedMetadata: viewModel.snapshot.isShowingCachedMetadata
+                                )
+                            }
+                            PersonalSystemCard(
+                                system: viewModel.snapshot.personalSystem,
+                                uptime: viewModel.snapshot.uptime
+                            )
                             WidgetGridView(widgets: viewModel.snapshot.widgets)
                             AppGridView(applications: viewModel.snapshot.applications)
                         }
@@ -31,6 +46,7 @@ struct MOOSHomeView: View {
 
                     SystemBarView(
                         connectionState: viewModel.snapshot.connectionState,
+                        latencyMilliseconds: viewModel.snapshot.latencyMilliseconds,
                         sessions: viewModel.snapshot.sessions,
                         onMOOSTap: showPowerMenu,
                         onMOOSLongPress: showRadialMenu,
@@ -64,7 +80,7 @@ struct MOOSHomeView: View {
         }
         .preferredColorScheme(.dark)
         .task {
-            await viewModel.load()
+            await viewModel.start()
         }
         .alert(item: $notice) { notice in
             Alert(
@@ -169,7 +185,7 @@ struct MOOSHomeView: View {
                 message: "Multi-instance management is outside the current scope."
             )
         case .settings:
-            SettingsPlaceholderView()
+            SettingsView(viewModel: settingsViewModel)
         }
     }
 }
@@ -214,6 +230,7 @@ private struct HomeHeader: View {
 
 private struct PersonalSystemCard: View {
     let system: PersonalSystem
+    let uptime: SynchronizedUptime?
 
     var body: some View {
         HStack(spacing: 16) {
@@ -229,6 +246,13 @@ private struct PersonalSystemCard: View {
                 Text(system.state.label)
                     .font(.caption.monospaced())
                     .foregroundStyle(MOOSTheme.secondaryText)
+                if let uptime {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text("Uptime \(uptime.formatted(at: context.date))")
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(MOOSTheme.secondaryText)
+                    }
+                }
             }
 
             Spacer()
@@ -246,6 +270,16 @@ private struct PersonalSystemCard: View {
     }
 }
 
-#Preview {
-    MOOSHomeView(viewModel: .preview)
+#Preview("Connected") {
+    MOOSHomeView(
+        viewModel: .preview(),
+        settingsViewModel: .preview
+    )
+}
+
+#Preview("Offline cache") {
+    MOOSHomeView(
+        viewModel: .preview(.offline),
+        settingsViewModel: .preview
+    )
 }

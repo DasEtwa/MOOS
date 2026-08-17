@@ -1,4 +1,4 @@
-enum ConnectionState: String, CaseIterable, Equatable, Sendable {
+enum ConnectionState: String, CaseIterable, Codable, Equatable, Sendable {
     case connected
     case connecting
     case reconnecting

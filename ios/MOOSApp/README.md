@@ -19,3 +19,19 @@ widgets, an app grid, connection/time/session indicators, and the experimental
 MOOS menus. Tap the bottom-left MOOS button for non-functional system controls;
 long-press it for the replaceable radial navigation prototype. Running-app
 context actions are also placeholders and do not issue backend commands.
+
+## State lifetimes
+
+- Local preferences use a small `UserDefaults` store for layout density, theme,
+  animations, and app ordering.
+- Remote metadata has a versioned, atomically written JSON cache. App icon
+  metadata includes a fallback symbol plus an optional content hash so icon
+  bytes can be cached independently later.
+- Live state is modeled separately for metrics, sessions, latency, connection,
+  and synchronized uptime. Services publish snapshots with `AsyncStream` rather
+  than requiring view polling.
+
+The connected app and the reconnecting/offline previews still use mock data.
+Offline snapshots deliberately retain cached widgets and apps. The Protocol v1
+request type is transport-independent; there is still no network transport,
+pairing, credential, or live backend client in this project.

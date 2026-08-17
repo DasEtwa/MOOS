@@ -14,11 +14,16 @@ final class HomeViewModel: ObservableObject {
         snapshot = initialSnapshot
     }
 
-    func load() async {
-        snapshot = await service.homeSnapshot()
+    func start() async {
+        for await nextSnapshot in service.snapshots() {
+            guard !Task.isCancelled else {
+                return
+            }
+            snapshot = nextSnapshot
+        }
     }
 
-    static var preview: HomeViewModel {
-        HomeViewModel(service: MockMOOSStateService())
+    static func preview(_ scenario: MockConnectionScenario = .connected) -> HomeViewModel {
+        HomeViewModel(service: MockMOOSStateService(scenario: scenario))
     }
 }

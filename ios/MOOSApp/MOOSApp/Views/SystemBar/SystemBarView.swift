@@ -25,6 +25,7 @@ enum RunningAppAction: String, Equatable, Identifiable {
 
 struct SystemBarView: View {
     let connectionState: ConnectionState
+    let latencyMilliseconds: Int?
     let sessions: [AppSession]
     let onMOOSTap: () -> Void
     let onMOOSLongPress: () -> Void
@@ -51,7 +52,10 @@ struct SystemBarView: View {
 
             Spacer(minLength: 0)
 
-            ConnectionIndicator(state: connectionState)
+            ConnectionIndicator(
+                state: connectionState,
+                latencyMilliseconds: latencyMilliseconds
+            )
 
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 Text(context.date, format: .dateTime.hour().minute())
@@ -150,13 +154,18 @@ private struct RunningAppButton: View {
 
 private struct ConnectionIndicator: View {
     let state: ConnectionState
+    let latencyMilliseconds: Int?
 
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: state.isReachable ? "network" : "network.slash")
                 .foregroundStyle(state.isReachable ? MOOSTheme.accent : .orange)
             ViewThatFits(in: .horizontal) {
-                Text(state.label)
+                if let latencyMilliseconds, state.isReachable {
+                    Text("\(latencyMilliseconds) ms")
+                } else {
+                    Text(state.label)
+                }
                 EmptyView()
             }
         }
