@@ -12,7 +12,19 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from moos_protocol import FrameDecoder, FrameResult, encode_frame
+from moos_protocol import (
+    PROTOCOL_VERSION,
+    FrameDecoder,
+    FrameResult,
+    ProtocolError,
+    TerminalClose,
+    TerminalInput,
+    encode_frame,
+    make_terminal_error,
+    make_terminal_output,
+    parse_control_request,
+    parse_terminal_frame,
+)
 from moos_runtime import (
     AlreadyRunning,
     NotRunning,
@@ -23,7 +35,6 @@ from moos_runtime import (
 )
 
 
-PROTOCOL_VERSION = 1
 READ_BYTES = 4096
 TERMINAL_READ_BYTES = 2048
 LOG = logging.getLogger(__name__)
@@ -42,19 +53,8 @@ class MoosdService:
         self.runtime = runtime
 
     def dispatch(self, request: dict[str, Any]) -> DispatchResult:
-        if request.get("protocolVersion") != PROTOCOL_VERSION:
-            return DispatchResult(
-                self._error("unsupported_protocol", "protocolVersion must be 1")
-            )
-        if set(request) - {"protocolVersion", "operation"}:
-            return DispatchResult(self._error("invalid_request", "unknown request field"))
-        operation = request.get("operation")
-        if not isinstance(operation, str):
-            return DispatchResult(
-                self._error("invalid_request", "operation must be a string")
-            )
-
         try:
+            operation = parse_control_request(request).operation
             if operation == "status":
                 status = self.runtime.status()
                 return DispatchResult(self._ok(operation, {"personal": asdict(status)}))
@@ -78,6 +78,8 @@ class MoosdService:
             return DispatchResult(
                 self._error("unknown_operation", "operation is not supported")
             )
+        except ProtocolError as error:
+            return DispatchResult(self._error(error.code, error.message))
         except AlreadyRunning:
             return DispatchResult(
                 self._error("already_running", "Personal is already running")
@@ -204,7 +206,13 @@ def _handle_client(connection: socket.socket, service: MoosdService) -> None:
 
 
 def _terminal_error(connection: socket.socket, code: str) -> bool:
-    return _send(connection, {"type": "error", "code": code})
+    return _send(connection, make_terminal_error(code))
+
+
+def _terminal_protocol_error(code: str) -> str:
+    if code == "frame_too_large":
+        return "frame_too_large"
+    return "invalid_frame"
 
 
 def _handle_terminal_results(
@@ -214,20 +222,26 @@ def _handle_terminal_results(
 ) -> bool:
     for result in results:
         if result.error is not None or result.frame is None:
-            if not _terminal_error(connection, result.error or "invalid_frame"):
+            if not _terminal_error(
+                connection, _terminal_protocol_error(result.error or "invalid_frame")
+            ):
                 return False
             continue
-        frame = result.frame
-        frame_type = frame.get("type")
-        if frame_type == "input" and isinstance(frame.get("data"), str):
+        try:
+            terminal_frame = parse_terminal_frame(result.frame)
+        except ProtocolError as error:
+            if not _terminal_error(connection, error.code):
+                return False
+            continue
+        if isinstance(terminal_frame, TerminalInput):
             try:
-                channel.write(frame["data"].encode("utf-8"))
+                channel.write(terminal_frame.data.encode("utf-8"))
             except OSError:
                 _terminal_error(connection, "terminal_unavailable")
                 return False
-        elif frame_type == "close" and set(frame) == {"type"}:
+        elif isinstance(terminal_frame, TerminalClose):
             return False
-        elif not _terminal_error(connection, "invalid_frame"):
+        else:
             return False
     return True
 
@@ -258,11 +272,10 @@ def _serve_terminal(
                 output = channel.read(TERMINAL_READ_BYTES)
                 if not output:
                     return
-                frame = {
-                    "type": "output",
-                    "data": output.decode("utf-8", errors="replace"),
-                }
-                if not _send(connection, frame):
+                if not _send(
+                    connection,
+                    make_terminal_output(output.decode("utf-8", errors="replace")),
+                ):
                     return
     except OSError:
         return

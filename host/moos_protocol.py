@@ -4,10 +4,57 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 
+PROTOCOL_VERSION = 1
 MAX_FRAME_BYTES = 16 * 1024
+CONTROL_OPERATIONS = frozenset(
+    {
+        "status",
+        "personal.status",
+        "personal.start",
+        "personal.stop",
+        "personal.terminal.open",
+    }
+)
+
+
+class ProtocolError(ValueError):
+    """A client-visible protocol validation failure."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+class ByteTransport(Protocol):
+    """Minimal byte transport required by the versioned framing layer."""
+
+    def recv(self, size: int) -> bytes:
+        ...
+
+    def sendall(self, data: bytes) -> None:
+        ...
+
+    def fileno(self) -> int:
+        ...
+
+
+@dataclass(frozen=True)
+class ControlRequest:
+    operation: str
+
+
+@dataclass(frozen=True)
+class TerminalInput:
+    data: str
+
+
+@dataclass(frozen=True)
+class TerminalClose:
+    pass
 
 
 @dataclass(frozen=True)
@@ -16,6 +63,58 @@ class FrameResult:
 
     frame: dict[str, Any] | None = None
     error: str | None = None
+
+
+def make_control_request(operation: str) -> dict[str, Any]:
+    """Create a Protocol-v1 control request for a supported operation."""
+
+    if not isinstance(operation, str):
+        raise ProtocolError("invalid_request", "operation must be a string")
+    if operation not in CONTROL_OPERATIONS:
+        raise ProtocolError("unknown_operation", "operation is not supported")
+    return {"protocolVersion": PROTOCOL_VERSION, "operation": operation}
+
+
+def parse_control_request(frame: dict[str, Any]) -> ControlRequest:
+    """Validate and type a control-plane request without exposing host details."""
+
+    if not isinstance(frame, dict):
+        raise ProtocolError("invalid_request", "request must be one JSON object")
+    if frame.get("protocolVersion") != PROTOCOL_VERSION:
+        raise ProtocolError("unsupported_protocol", "protocolVersion must be 1")
+    if set(frame) - {"protocolVersion", "operation"}:
+        raise ProtocolError("invalid_request", "unknown request field")
+    operation = frame.get("operation")
+    if not isinstance(operation, str):
+        raise ProtocolError("invalid_request", "operation must be a string")
+    if operation not in CONTROL_OPERATIONS:
+        raise ProtocolError("unknown_operation", "operation is not supported")
+    return ControlRequest(operation)
+
+
+def parse_terminal_frame(frame: dict[str, Any]) -> TerminalInput | TerminalClose:
+    """Validate a client-to-server terminal frame."""
+
+    if not isinstance(frame, dict):
+        raise ProtocolError("invalid_frame", "terminal frame must be an object")
+    frame_type = frame.get("type")
+    if frame_type == "input":
+        if set(frame) != {"type", "data"} or not isinstance(frame.get("data"), str):
+            raise ProtocolError("invalid_frame", "input frame requires only string data")
+        return TerminalInput(frame["data"])
+    if frame_type == "close" and set(frame) == {"type"}:
+        return TerminalClose()
+    raise ProtocolError("invalid_frame", "unsupported terminal frame")
+
+
+def make_terminal_output(data: str) -> dict[str, str]:
+    if not isinstance(data, str):
+        raise TypeError("terminal output must be text")
+    return {"type": "output", "data": data}
+
+
+def make_terminal_error(code: str) -> dict[str, str]:
+    return {"type": "error", "code": code}
 
 
 class FrameDecoder:

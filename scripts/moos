@@ -18,10 +18,15 @@ if not MODULE_ROOT.is_dir():
     MODULE_ROOT = Path("/usr/lib/moos")
 sys.path.insert(0, str(MODULE_ROOT))
 
-from moos_protocol import FrameDecoder, FrameResult, encode_frame  # noqa: E402
+from moos_protocol import (  # noqa: E402
+    PROTOCOL_VERSION,
+    FrameDecoder,
+    FrameResult,
+    encode_frame,
+    make_control_request,
+)
 
 
-PROTOCOL_VERSION = 1
 DEFAULT_SOCKET = Path("/run/moos/moosd.sock")
 READ_BYTES = 4096
 
@@ -65,7 +70,7 @@ def request(socket_path: Path, operation: str) -> dict:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
         connection.connect(str(socket_path))
         connection.sendall(
-            encode_frame({"protocolVersion": PROTOCOL_VERSION, "operation": operation})
+            encode_frame(make_control_request(operation))
         )
         return _receive_frame(connection, FrameDecoder(), deque())
 
@@ -89,12 +94,7 @@ def terminal(socket_path: Path) -> int:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
         connection.connect(str(socket_path))
         connection.sendall(
-            encode_frame(
-                {
-                    "protocolVersion": PROTOCOL_VERSION,
-                    "operation": "personal.terminal.open",
-                }
-            )
+            encode_frame(make_control_request("personal.terminal.open"))
         )
         decoder = FrameDecoder()
         pending: deque[FrameResult] = deque()

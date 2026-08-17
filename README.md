@@ -40,12 +40,14 @@ must not be exposed remotely in its current development form.
 | scripts/stage-instance.sh | Atomically stages kernel/rootfs files outside the repository |
 | scripts/run-instance.sh | Starts a staged Instance in a systemd cgroup |
 | host/moos_protocol.py | Incremental bounded NDJSON framing |
+| PROTOCOL.md | Versioned Protocol v1 contract and compatibility rules |
 | host/moos_runtime.py | Fixed Personal lifecycle/status/console adapter |
 | host/moosd.py | Typed local control and terminal service |
 | tests/qemu_smoke.py | Host-side boot, login, utility, network, and shutdown smoke test |
 | tests/qemu_launcher.py | Host-side checks for isolated QEMU defaults and rejection paths |
 | tests/qemu_terminal_bridge.py | Real QEMU/moosd terminal restart/reconnect test |
 | tests/managed_personal.py | Root-only managed Personal M5 integration test |
+| tests/protocol_contract.py | Protocol v1 schema, error, and size contract test |
 | tests/runtime_isolation.py | Host-side checks for Phase 3.1 account and cgroup policy |
 | system/overlay/ | Files copied into the guest root filesystem |
 | AGENTS.md | Development rules for coding agents |
@@ -222,6 +224,14 @@ journalctl -u moosd.service
 The guest still has the documented blank local-development root password.
 Therefore the local socket group is security-sensitive, and neither this
 socket nor protocol is ready for Tailscale exposure.
+
+### M6 Protocol v1
+
+The local control plane now has an explicit transport-neutral Protocol v1
+contract in `PROTOCOL.md`. It defines the bounded NDJSON wire format, typed
+Personal status/lifecycle/terminal frames, structured errors, compatibility
+rules, and the public runtime states. The current Unix socket remains the only
+transport; authentication and Tailscale are intentionally deferred to M7/M8.
 
 ## Phase 1/2 smoke test
 

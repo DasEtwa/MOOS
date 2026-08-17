@@ -180,7 +180,19 @@ Completion criteria: a non-UI client can use the documented protocol.
 
 Do not do yet: public exposure or final mobile UI assumptions.
 
-Status: Planned
+Status: Complete
+Implemented commit: `feat: define MOOS Protocol v1`
+Actual verification: `python3 tests/protocol_contract.py`; `python3 tests/moosd_protocol.py`;
+`python3 tests/moos_cli.py`; `python3 tests/runtime_control.py`;
+`python3 tests/personal_identity.py`; `python3 tests/runtime_isolation.py`;
+`python3 tests/qemu_launcher.py`; `python3 tests/qemu_smoke.py`;
+`python3 tests/qemu_terminal_bridge.py`; Python compilation, shell syntax, and
+`git diff --check` all passed. Protocol v1 is documented in `PROTOCOL.md`,
+centralizes framing/version/typed validation, and does not expose a remote
+transport or Host internals.
+Blockers: none
+Deviations: M6 formalizes the Protocol v1 contract already exercised by the
+hardened M5 local transport; it does not open a new network transport.
 
 ## Slice M7 — Authentication and pairing MVP
 
