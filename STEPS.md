@@ -88,7 +88,16 @@ direct QEMU lifecycle logic.
 
 Do not do yet: accounts, Flatpak, streaming, agents, cloud services.
 
-Status: Planned
+Status: Complete
+Implemented commit: `feat: add local moosd MVP`
+Actual verification: `python3 tests/moosd_protocol.py`; `python3 tests/runtime_control.py`;
+`python3 tests/personal_identity.py`; `python3 tests/runtime_isolation.py`;
+`python3 tests/qemu_launcher.py`; `python3 tests/qemu_smoke.py`;
+`python3 -m py_compile ...`; shell syntax, and `git diff --check` all passed.
+The daemon is Unix-socket-only, uses typed status/start/stop operations, and
+rejects arbitrary `exec` and unknown request fields.
+Blockers: none
+Deviations: none
 
 ## Slice M4 — Local MOOS CLI
 
