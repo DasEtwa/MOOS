@@ -194,6 +194,13 @@ transport or Host internals. Follow-up hardening added strict integer-version
 checks, typed operation-specific response validation in daemon and CLI,
 structured truncated-frame handling at socket EOF, response compatibility
 checks, and exact frame-size boundary coverage.
+Installed-control-plane acceptance on 2026-08-17 also passed from the current
+checkout: `sudo ./scripts/setup-control-plane.sh --source-root "$PWD"`,
+`sudo systemctl restart moosd.socket`, and `sudo python3
+tests/managed_personal.py`. The real systemd-managed Personal start/login,
+framed `moos-info`, daemon restart/reconnect, managed stop, and process reaping
+all passed. The socket remains enabled/active and the socket-activated daemon is
+inactive with `Result=success` when idle.
 Blockers: none
 Deviations: M6 formalizes the Protocol v1 contract already exercised by the
 hardened M5 local transport; it does not open a new network transport.
