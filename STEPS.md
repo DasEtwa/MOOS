@@ -34,7 +34,7 @@ temporary names such as `test-phase31`.
 Do not do yet: multi-instance management, `moosd`, remote APIs, or iOS code.
 
 Status: Complete
-Implemented commit: `feat: establish personal MOOS runtime identity`
+Implemented commit: `2c99d8010a7d22cce8bbf75222fcc689b2848814`
 Actual verification: `sh -n scripts/*.sh`; `python3 tests/personal_identity.py`;
 `python3 tests/runtime_isolation.py`; `python3 tests/qemu_launcher.py`; and
 `python3 tests/qemu_smoke.py` all passed. `git diff --check` passed.
@@ -60,7 +60,15 @@ library while the existing sandbox and cgroup path remains the implementation.
 
 Do not do yet: general instance manager, daemon, authentication, or Tailscale.
 
-Status: Planned
+Status: Complete
+Implemented commit: `feat: add personal runtime control library`
+Actual verification: `python3 tests/runtime_control.py`; `python3 tests/personal_identity.py`;
+`python3 tests/runtime_isolation.py`; `python3 tests/qemu_launcher.py`;
+`python3 tests/qemu_smoke.py`; `python3 -m py_compile ...`; and `git diff --check`
+all passed. The adapter delegates launch to `scripts/run-instance.sh`, does not
+expose host PTY paths, and keeps reboot unavailable until M5.
+Blockers: none
+Deviations: none
 
 ## Slice M3 — Local `moosd` MVP
 
