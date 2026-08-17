@@ -20,6 +20,7 @@ Verified baseline:
 - roughly 5.7 MiB used in the root filesystem
 - a 60 MiB ext2 image with roughly 55.1 MiB usable space
 - a dynamic green login banner with kernel, RAM, uptime, IP, and rootfs data
+- initial `moos-version`, `moos-info`, `moos-network`, and `moos-power` tools
 
 Remote access, moosd, host control, a GUI, mobile clients, and application
 streaming are not implemented yet. Their interfaces must remain replaceable.
@@ -31,7 +32,7 @@ streaming are not implemented yet. Their interfaces must remain replaceable.
 | configs/ | Tracked Buildroot configuration used for the MOOS QEMU image |
 | scripts/build.sh | Fetches the pinned Buildroot revision and builds MOOS |
 | scripts/run-qemu.sh | Portable QEMU launcher for the generated image |
-| tests/qemu_smoke.py | Host-side boot, login, network, and shutdown smoke test |
+| tests/qemu_smoke.py | Host-side boot, login, utility, network, and shutdown smoke test |
 | system/overlay/ | Files copied into the guest root filesystem |
 | AGENTS.md | Development rules for coding agents |
 | BUG_AUDIT.md | Evidence-based baseline audit |
@@ -90,7 +91,7 @@ terminal:
 
 Stop the serial-only session with Ctrl+A, then X.
 
-## Phase 1 smoke test
+## Phase 1/2 smoke test
 
 After building, run the standard host-side smoke test:
 
@@ -100,8 +101,25 @@ python3 tests/qemu_smoke.py
 
 The test boots QEMU through the tracked launcher, waits for the login prompt,
 checks the banner, kernel, BusyBox, RAM, uptime, /proc, /sys, DHCP, rootfs
-space, and writable /tmp, then requests a guest poweroff and verifies that QEMU
-exits.
+space, and writable /tmp. It also exercises the four MOOS utilities, reboots the
+guest, and verifies a clean poweroff and QEMU exit.
+
+## MOOS utilities
+
+The first utilities live in `system/overlay/usr/bin/` and use only interfaces
+already provided by BusyBox and the minimal guest filesystem:
+
+~~~text
+moos-version       print the current MOOS release
+moos-info          print kernel, architecture, memory, uptime, rootfs, and network data
+moos-network       print hostname, link status, IPv4 address, and gateway
+moos-power status  print the current development power/session status
+~~~
+
+`moos-power` is intentionally small. `status` is read-only; `reboot` and
+`poweroff` are explicit wrappers around the current BusyBox actions and require
+root. It does not yet implement MOOS session management or remote power policy.
+The release values are kept in `system/overlay/etc/moos-release`.
 
 ## Guest customization
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Boot MOOS in QEMU and verify the Phase 1 console baseline."""
+"""Boot MOOS in QEMU and verify the Phase 1/2 console baseline."""
 
 import os
 import pty
@@ -142,6 +142,44 @@ echo MOOS_SMOKE_DONE
         require(r"^MOOS_SMOKE_SYS=ok$", smoke_output, "/sys")
         require(r"^MOOS_SMOKE_TMP=ok$", smoke_output, "writable /tmp")
 
+        session.send(
+            r"""echo MOOS_SMOKE_TOOLS_BEGIN
+moos-version
+moos-network
+moos-info
+moos-power
+if moos-power invalid >/dev/null 2>&1; then
+    echo MOOS_SMOKE_POWER_INVALID=unexpected-success
+else
+    echo MOOS_SMOKE_POWER_INVALID=ok
+fi
+echo MOOS_SMOKE_TOOLS_DONE
+"""
+        )
+        tools_output = session.read_until(r"^MOOS_SMOKE_TOOLS_DONE$", 15)
+
+        require(r"^MOOS 0\.1\.0-dev$", tools_output, "moos-version")
+        require(r"^hostname: moos$", tools_output, "moos-network hostname")
+        require(r"^status: online$", tools_output, "moos-network status")
+        require(
+            r"^IPv4: (?:[0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]+$",
+            tools_output,
+            "moos-network IPv4",
+        )
+        require(r"^version: MOOS 0\.1\.0-dev$", tools_output, "moos-info version")
+        require(
+            r"^network: online \((?:[0-9]{1,3}\.){3}[0-9]{1,3}\)$",
+            tools_output,
+            "moos-info network",
+        )
+        require(
+            r"^session: BusyBox init \(MOOS session manager not implemented\)$",
+            tools_output,
+            "moos-power status",
+        )
+        require(r"^actions: reboot, poweroff$", tools_output, "moos-power actions")
+        require(r"^MOOS_SMOKE_POWER_INVALID=ok$", tools_output, "moos-power invalid action")
+
         session.send("reboot\n")
         reboot_login = session.read_until(r"login:\s*", 45)
         session.send("root\n")
@@ -157,15 +195,16 @@ echo MOOS_SMOKE_DONE
         if exit_status != 0:
             raise AssertionError("QEMU exited with status " + str(exit_status))
 
-        print("MOOS Phase 1 smoke test: PASS")
+        print("MOOS Phase 1/2 smoke test: PASS")
         print("  boot/login/banner: ok")
         print("  kernel/BusyBox/RAM/uptime: ok")
         print("  networking and rootfs: ok")
         print("  /proc, /sys, writable /tmp: ok")
+        print("  MOOS utilities: ok")
         print("  guest reboot, poweroff, and QEMU exit: ok")
         return 0
     except (AssertionError, OSError, RuntimeError, TimeoutError) as error:
-        print("MOOS Phase 1 smoke test: FAIL", file=sys.stderr)
+        print("MOOS Phase 1/2 smoke test: FAIL", file=sys.stderr)
         print("  " + str(error), file=sys.stderr)
         if session is not None:
             print("  console tail:", file=sys.stderr)

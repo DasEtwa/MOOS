@@ -1,0 +1,25 @@
+#!/bin/sh
+
+set -eu
+
+case "${1:-}" in
+    '')
+        ;;
+    -h|--help)
+        printf 'Usage: moos-version\n'
+        exit 0
+        ;;
+    *)
+        echo 'Usage: moos-version' >&2
+        exit 2
+        ;;
+esac
+
+if [ ! -r /etc/moos-release ]; then
+    echo 'moos-version: /etc/moos-release is missing' >&2
+    exit 1
+fi
+
+. /etc/moos-release
+
+printf '%s %s\n' "$MOOS_NAME" "$MOOS_VERSION"

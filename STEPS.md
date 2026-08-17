@@ -94,6 +94,11 @@ reliable enough for repeatable development.
 
 ## Phase 2 — MOOS tooling
 
+Status: `moos-version`, `moos-info`, and `moos-network` are implemented as
+small BusyBox-compatible shell utilities. `moos-power` is a deliberately thin
+development wrapper with read-only status plus explicit local `reboot` and
+`poweroff` actions. Richer session and policy behavior remains deferred.
+
 ### Goal
 
 Add only small utilities that make the minimal system easier to operate.
