@@ -289,18 +289,65 @@ jobs:
         run: |
           set -euo pipefail
           PAYLOAD_ROOT="$RUNNER_TEMP/release-payload"
+          RELEASE_RECORD="$RUNNER_TEMP/draft-release.json"
+          DRAFT_CREATED=false
+          cleanup_draft() {
+            status=$?
+            trap - EXIT
+            if [[ "$DRAFT_CREATED" == true ]]; then
+              gh release delete "$RELEASE_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --yes || true
+            fi
+            exit "$status"
+          }
+          trap cleanup_draft EXIT
+
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release already exists for $RELEASE_TAG; refusing to replace assets" >&2
             exit 1
           fi
           gh release create "$RELEASE_TAG" \
-            "$PAYLOAD_ROOT/MOOS.ipa" \
-            "$PAYLOAD_ROOT/MOOS-alt-source.json" \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
+            --draft \
             --title "MOOS iOS $RELEASE_VERSION" \
             --generate-notes \
             --notes-file "$PAYLOAD_ROOT/release-notes.md"
+
+          DRAFT_CREATED=true
+          gh release upload "$RELEASE_TAG" \
+            "$PAYLOAD_ROOT/MOOS.ipa" \
+            "$PAYLOAD_ROOT/MOOS-alt-source.json" \
+            --repo "$GITHUB_REPOSITORY"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            > "$RELEASE_RECORD"
+          python3 - "$RELEASE_RECORD" "$PAYLOAD_ROOT" "$RELEASE_TAG" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          release = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          payload = pathlib.Path(sys.argv[2])
+          expected_tag = sys.argv[3]
+          assert release["draft"] is True
+          assert release["prerelease"] is False
+          assert release["tag_name"] == expected_tag
+          expected_assets = {
+              "MOOS.ipa": (payload / "MOOS.ipa").stat().st_size,
+              "MOOS-alt-source.json": (payload / "MOOS-alt-source.json").stat().st_size,
+          }
+          actual_assets = {asset["name"]: asset["size"] for asset in release["assets"]}
+          assert actual_assets == expected_assets
+          PY
+
+          # From here on, preserve an uncertain draft rather than risking deletion
+          # after GitHub may already have accepted the publication request.
+          DRAFT_CREATED=false
+          gh release edit "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false
+          trap - EXIT
 
   deploy-alt-source:
     needs:
