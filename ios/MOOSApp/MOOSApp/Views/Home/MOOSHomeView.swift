@@ -2,24 +2,59 @@ import SwiftUI
 
 struct MOOSHomeView: View {
     @StateObject private var viewModel: HomeViewModel
+    @State private var navigationPath = NavigationPath()
+    @State private var isPowerMenuVisible = false
+    @State private var isRadialMenuVisible = false
+    @State private var notice: ShellNotice?
 
     init(viewModel: @autoclosure @escaping () -> HomeViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel())
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             ZStack {
                 MOOSTheme.background.ignoresSafeArea()
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 28) {
-                        HomeHeader(snapshot: viewModel.snapshot)
-                        PersonalSystemCard(system: viewModel.snapshot.personalSystem)
-                        QuickLaunchGrid(applications: viewModel.snapshot.applications)
+                VStack(spacing: 0) {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 26) {
+                            HomeHeader(snapshot: viewModel.snapshot)
+                            PersonalSystemCard(system: viewModel.snapshot.personalSystem)
+                            WidgetGridView(widgets: viewModel.snapshot.widgets)
+                            AppGridView(applications: viewModel.snapshot.applications)
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 18)
+                        .padding(.bottom, 24)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 18)
+
+                    SystemBarView(
+                        connectionState: viewModel.snapshot.connectionState,
+                        sessions: viewModel.snapshot.sessions,
+                        onMOOSTap: showPowerMenu,
+                        onMOOSLongPress: showRadialMenu,
+                        onSessionAction: handleSessionAction
+                    )
+                }
+
+                if isPowerMenuVisible {
+                    PowerMenuView(
+                        onSelect: handlePowerAction,
+                        onDismiss: hideOverlays
+                    )
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    .zIndex(1)
+                }
+
+                if isRadialMenuVisible {
+                    RadialMenuView(
+                        items: .shellDefaults,
+                        onSelect: handleRadialSelection,
+                        onDismiss: hideOverlays
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                    .zIndex(2)
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -31,11 +66,82 @@ struct MOOSHomeView: View {
         .task {
             await viewModel.load()
         }
+        .alert(item: $notice) { notice in
+            Alert(
+                title: Text(notice.title),
+                message: Text(notice.message),
+                dismissButton: .default(Text("OK"))
+            )
+        }
+    }
+
+    private func showPowerMenu() {
+        withAnimation(.easeOut(duration: 0.18)) {
+            isRadialMenuVisible = false
+            isPowerMenuVisible = true
+        }
+    }
+
+    private func showRadialMenu() {
+        withAnimation(.easeOut(duration: 0.2)) {
+            isPowerMenuVisible = false
+            isRadialMenuVisible = true
+        }
+    }
+
+    private func hideOverlays() {
+        withAnimation(.easeOut(duration: 0.16)) {
+            isPowerMenuVisible = false
+            isRadialMenuVisible = false
+        }
+    }
+
+    private func handlePowerAction(_ action: PowerMenuAction) {
+        hideOverlays()
+        notice = ShellNotice(
+            id: "power-\(action.id)",
+            title: "\(action.title) unavailable",
+            message: "This mock shell does not send power or session commands."
+        )
+    }
+
+    private func handleRadialSelection(_ item: RadialMenuItem) {
+        hideOverlays()
+        navigationPath.append(item.destination)
+    }
+
+    private func handleSessionAction(_ session: AppSession, _ action: RunningAppAction) {
+        if action == .open {
+            if let application = viewModel.snapshot.applications.first(
+                where: { $0.id == session.applicationID }
+            ) {
+                navigationPath.append(application.destination)
+                return
+            }
+        }
+
+        notice = ShellNotice(
+            id: "session-\(session.id)-\(action.id)",
+            title: "\(action.title) unavailable",
+            message: "\(session.displayName) is mock session metadata for now."
+        )
     }
 
     @ViewBuilder
     private func destinationView(for destination: ShellDestination) -> some View {
         switch destination {
+        case .blender:
+            ShellPlaceholderView(
+                title: "Blender",
+                symbolName: "cube.transparent",
+                message: "Linux application streaming is intentionally not implemented."
+            )
+        case .discord:
+            ShellPlaceholderView(
+                title: "Discord",
+                symbolName: "bubble.left.and.bubble.right",
+                message: "This application tile is a local shell prototype."
+            )
         case .terminal:
             TerminalPlaceholderView()
         case .files:
@@ -50,10 +156,28 @@ struct MOOSHomeView: View {
                 symbolName: "square.grid.2x2",
                 message: "Installed application metadata will appear here later."
             )
+        case .appStore:
+            ShellPlaceholderView(
+                title: "App Store",
+                symbolName: "shippingbox",
+                message: "Application discovery is only a navigation concept today."
+            )
+        case .instances:
+            ShellPlaceholderView(
+                title: "Instances",
+                symbolName: "server.rack",
+                message: "Multi-instance management is outside the current scope."
+            )
         case .settings:
             SettingsPlaceholderView()
         }
     }
+}
+
+private struct ShellNotice: Identifiable {
+    let id: String
+    let title: String
+    let message: String
 }
 
 private struct HomeHeader: View {
@@ -118,47 +242,6 @@ private struct PersonalSystemCard: View {
         .overlay {
             RoundedRectangle(cornerRadius: 20)
                 .stroke(MOOSTheme.panelBorder, lineWidth: 1)
-        }
-    }
-}
-
-private struct QuickLaunchGrid: View {
-    let applications: [ShellApp]
-
-    private let columns = [
-        GridItem(.flexible(), spacing: 12),
-        GridItem(.flexible(), spacing: 12),
-    ]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("QUICK LAUNCH")
-                .font(.caption.bold().monospaced())
-                .tracking(1.3)
-                .foregroundStyle(MOOSTheme.secondaryText)
-
-            LazyVGrid(columns: columns, spacing: 12) {
-                ForEach(applications) { application in
-                    NavigationLink(value: application.destination) {
-                        VStack(alignment: .leading, spacing: 20) {
-                            Image(systemName: application.symbolName)
-                                .font(.system(size: 24, weight: .medium))
-                                .foregroundStyle(MOOSTheme.accent)
-                            Text(application.name)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.white)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
-                        .background(MOOSTheme.panel, in: RoundedRectangle(cornerRadius: 18))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 18)
-                                .stroke(MOOSTheme.panelBorder, lineWidth: 1)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
         }
     }
 }

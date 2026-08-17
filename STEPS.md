@@ -289,7 +289,16 @@ simulator build where Xcode is available.
 Completion criteria: Home visibly demonstrates desktop, widgets, apps, radial
 navigation, and system controls without streaming Linux UI.
 
-Status: Planned
+Status: Complete
+Implemented commit: `feat: build native MOOS shell prototype`
+Actual verification: `python3 tests/ios_client.py`,
+`python3 tests/protocol_contract.py`, `python3 tests/runtime_isolation.py`,
+Python compilation, shared-scheme XML validation, and `git diff --check` passed.
+The Linux development host has no Swift/Xcode toolchain, so simulator build and
+visual inspection remain deferred to I4 macOS CI and a later Apple device.
+Blockers: none
+Deviations: power and running-app actions intentionally display mock notices;
+they do not cross a service boundary.
 
 ## Slice I3 — Cache and resilient state boundaries
 

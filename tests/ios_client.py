@@ -29,6 +29,18 @@ def main() -> None:
     assert swift_sources, "iOS sources are missing"
     for source in swift_sources:
         assert source.name in project_text, f"project does not reference {source.name}"
+        assert f"{source.name} in Sources" in project_text, (
+            f"project does not compile {source.name}"
+        )
+
+    component_sources = {
+        "AppGridView.swift",
+        "WidgetGridView.swift",
+        "RadialMenuView.swift",
+        "PowerMenuView.swift",
+        "SystemBarView.swift",
+    }
+    assert component_sources <= {source.name for source in swift_sources}
 
     forbidden_client_details = (
         "qemu",
@@ -40,6 +52,11 @@ def main() -> None:
     combined_sources = "\n".join(source.read_text().lower() for source in swift_sources)
     for detail in forbidden_client_details:
         assert detail not in combined_sources, f"client leaks host detail: {detail}"
+
+    assert "longpressgesture" in combined_sources
+    assert ".contextmenu" in combined_sources
+    assert "timelineview" in combined_sources
+    assert "mock controls" in combined_sources
 
     assert not list(IOS_ROOT.rglob("Package.resolved")), "unexpected dependency lockfile"
     print("MOOS iOS client structure test: PASS")

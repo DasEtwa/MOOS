@@ -1,7 +1,11 @@
-enum ShellDestination: String, Hashable, Sendable {
+enum ShellDestination: Hashable, Sendable {
+    case blender
+    case discord
     case terminal
     case files
     case apps
+    case appStore
+    case instances
     case settings
 }
 

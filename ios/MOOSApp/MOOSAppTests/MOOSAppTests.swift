@@ -15,7 +15,23 @@ final class MOOSAppTests: XCTestCase {
         XCTAssertEqual(snapshot.personalSystem.state, .running)
         XCTAssertEqual(snapshot.connectionState, .connected)
         XCTAssertEqual(snapshot.applications.map(\.id), [
-            "terminal", "files", "apps", "settings",
+            "blender", "discord", "terminal", "files", "settings",
         ])
+        XCTAssertEqual(snapshot.widgets.count, 6)
+        XCTAssertEqual(snapshot.sessions.count, 2)
+    }
+
+    func testRadialMenuKeepsNavigationMetadataSeparateFromLayout() {
+        let items = [RadialMenuItem].shellDefaults
+
+        XCTAssertEqual(items.count, 6)
+        XCTAssertEqual(Set(items.map(\.id)).count, items.count)
+        XCTAssertTrue(items.contains { $0.destination == .terminal })
+        XCTAssertTrue(items.contains { $0.destination == .settings })
+    }
+
+    func testSystemControlsAreFiniteLocalPlaceholders() {
+        XCTAssertEqual(PowerMenuAction.allCases, [.lock, .reboot, .shutdown])
+        XCTAssertEqual(RunningAppAction.forceClose.title, "Force close")
     }
 }

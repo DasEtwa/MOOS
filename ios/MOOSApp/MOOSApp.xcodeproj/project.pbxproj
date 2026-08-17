@@ -21,6 +21,14 @@
 		B1000000000000000000000C /* ShellPlaceholderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000000000000000000000C /* ShellPlaceholderView.swift */; };
 		B1000000000000000000000D /* TerminalPlaceholderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000000000000000000000D /* TerminalPlaceholderView.swift */; };
 		B1000000000000000000000E /* SettingsPlaceholderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000000000000000000000E /* SettingsPlaceholderView.swift */; };
+		B1000000000000000000000F /* AppSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000000000000000000000F /* AppSession.swift */; };
+		B10000000000000000000010 /* ShellWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000010 /* ShellWidget.swift */; };
+		B10000000000000000000011 /* AppGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000011 /* AppGridView.swift */; };
+		B10000000000000000000012 /* WidgetGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000012 /* WidgetGridView.swift */; };
+		B10000000000000000000013 /* SectionLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000013 /* SectionLabel.swift */; };
+		B10000000000000000000014 /* RadialMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000014 /* RadialMenuView.swift */; };
+		B10000000000000000000015 /* PowerMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000015 /* PowerMenuView.swift */; };
+		B10000000000000000000016 /* SystemBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000016 /* SystemBarView.swift */; };
 		B20000000000000000000001 /* MOOSAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000001 /* MOOSAppTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -51,6 +59,14 @@
 		C1000000000000000000000C /* ShellPlaceholderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellPlaceholderView.swift; sourceTree = "<group>"; };
 		C1000000000000000000000D /* TerminalPlaceholderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalPlaceholderView.swift; sourceTree = "<group>"; };
 		C1000000000000000000000E /* SettingsPlaceholderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPlaceholderView.swift; sourceTree = "<group>"; };
+		C1000000000000000000000F /* AppSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSession.swift; sourceTree = "<group>"; };
+		C10000000000000000000010 /* ShellWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellWidget.swift; sourceTree = "<group>"; };
+		C10000000000000000000011 /* AppGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGridView.swift; sourceTree = "<group>"; };
+		C10000000000000000000012 /* WidgetGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetGridView.swift; sourceTree = "<group>"; };
+		C10000000000000000000013 /* SectionLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionLabel.swift; sourceTree = "<group>"; };
+		C10000000000000000000014 /* RadialMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadialMenuView.swift; sourceTree = "<group>"; };
+		C10000000000000000000015 /* PowerMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerMenuView.swift; sourceTree = "<group>"; };
+		C10000000000000000000016 /* SystemBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemBarView.swift; sourceTree = "<group>"; };
 		C20000000000000000000001 /* MOOSAppTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MOOSAppTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -104,11 +120,13 @@
 		D12000000000000000000001 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				C1000000000000000000000F /* AppSession.swift */,
 				C10000000000000000000003 /* ConnectionState.swift */,
 				C10000000000000000000007 /* HomeSnapshot.swift */,
 				C10000000000000000000004 /* Host.swift */,
 				C10000000000000000000005 /* PersonalSystem.swift */,
 				C10000000000000000000006 /* ShellApp.swift */,
+				C10000000000000000000010 /* ShellWidget.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -125,10 +143,14 @@
 		D14000000000000000000001 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				D14500000000000000000001 /* Apps */,
 				D14100000000000000000001 /* Home */,
+				D14600000000000000000001 /* RadialMenu */,
 				D14200000000000000000001 /* Settings */,
 				D14300000000000000000001 /* Shared */,
+				D14700000000000000000001 /* SystemBar */,
 				D14400000000000000000001 /* Terminal */,
+				D14800000000000000000001 /* Widgets */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -153,6 +175,7 @@
 		D14300000000000000000001 /* Shared */ = {
 			isa = PBXGroup;
 			children = (
+				C10000000000000000000013 /* SectionLabel.swift */,
 				C1000000000000000000000C /* ShellPlaceholderView.swift */,
 			);
 			path = Shared;
@@ -164,6 +187,39 @@
 				C1000000000000000000000D /* TerminalPlaceholderView.swift */,
 			);
 			path = Terminal;
+			sourceTree = "<group>";
+		};
+		D14500000000000000000001 /* Apps */ = {
+			isa = PBXGroup;
+			children = (
+				C10000000000000000000011 /* AppGridView.swift */,
+			);
+			path = Apps;
+			sourceTree = "<group>";
+		};
+		D14600000000000000000001 /* RadialMenu */ = {
+			isa = PBXGroup;
+			children = (
+				C10000000000000000000014 /* RadialMenuView.swift */,
+			);
+			path = RadialMenu;
+			sourceTree = "<group>";
+		};
+		D14700000000000000000001 /* SystemBar */ = {
+			isa = PBXGroup;
+			children = (
+				C10000000000000000000015 /* PowerMenuView.swift */,
+				C10000000000000000000016 /* SystemBarView.swift */,
+			);
+			path = SystemBar;
+			sourceTree = "<group>";
+		};
+		D14800000000000000000001 /* Widgets */ = {
+			isa = PBXGroup;
+			children = (
+				C10000000000000000000012 /* WidgetGridView.swift */,
+			);
+			path = Widgets;
 			sourceTree = "<group>";
 		};
 		D20000000000000000000001 /* MOOSAppTests */ = {
@@ -295,6 +351,14 @@
 				B1000000000000000000000C /* ShellPlaceholderView.swift in Sources */,
 				B1000000000000000000000D /* TerminalPlaceholderView.swift in Sources */,
 				B1000000000000000000000E /* SettingsPlaceholderView.swift in Sources */,
+				B1000000000000000000000F /* AppSession.swift in Sources */,
+				B10000000000000000000010 /* ShellWidget.swift in Sources */,
+				B10000000000000000000011 /* AppGridView.swift in Sources */,
+				B10000000000000000000012 /* WidgetGridView.swift in Sources */,
+				B10000000000000000000013 /* SectionLabel.swift in Sources */,
+				B10000000000000000000014 /* RadialMenuView.swift in Sources */,
+				B10000000000000000000015 /* PowerMenuView.swift in Sources */,
+				B10000000000000000000016 /* SystemBarView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
