@@ -47,10 +47,29 @@ def main():
     direct = run("--direct", "--serial-only", "--dry-run")
     require("isolation: direct host process", direct, "explicit direct mode")
 
+    managed_console = run(
+        "--serial-only",
+        "--console-socket",
+        "/run/moos-instances/personal/console.sock",
+        "--dry-run",
+    )
+    require(
+        "serial endpoint: managed reconnectable Unix socket",
+        managed_console,
+        "managed serial endpoint",
+    )
+
     run("--serial-only", "--network", "invalid", "--dry-run", expected=2)
     run("--serial-only", "--cpus", "0", "--dry-run", expected=2)
     run("--serial-only", "--cpus", "9", "--dry-run", expected=2)
     run("--serial-only", "--memory", "4097M", "--dry-run", expected=2)
+    run(
+        "--serial-only",
+        "--console-socket",
+        "/tmp/arbitrary.sock",
+        "--dry-run",
+        expected=2,
+    )
     run("--dry-run", expected=2)
 
     print("MOOS QEMU launcher isolation test: PASS")

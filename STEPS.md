@@ -132,8 +132,12 @@ guest's existing serial console.
 
 Prerequisites: M4 complete.
 
-Changes: typed open/input/output/close lifecycle; client disconnect does not
-stop the guest; input is delivered only to the guest channel.
+Changes: bounded incremental NDJSON framing; typed open/input/output/close
+lifecycle; systemd-owned reconnectable QEMU serial socket; accurate structured
+systemd status; synchronous/reaped launcher handoff; confirmed-stop semantics;
+and a socket-activated, group-restricted local `moosd` service model. Client or
+daemon disconnect does not stop the guest; input is delivered only to the
+guest channel.
 
 Tests: local interactive terminal, `moos-info`, disconnect/reconnect, cleanup,
 and negative host-command tests.
@@ -144,14 +148,22 @@ Do not do yet: graphical streaming or arbitrary host shell execution.
 
 Status: In Progress
 Implemented commit: `feat: bridge Personal terminal through moosd`
-Actual verification: PTY bridge tests, CLI bridge test, all existing policy,
-launcher, identity, runtime-control, and QEMU smoke tests pass. The managed
-QEMU terminal path has not yet been run end-to-end because this checkout has
-no staged `/var/lib/moos/instances/personal` and activation requires explicit
-administrator authorization.
-Blockers: real managed Personal staging/start is required before M5 can be
-marked Complete; no sudo password is requested or stored.
-Deviations: none
+Actual verification on 2026-08-17: Python compilation, shell syntax,
+`git diff --check`, protocol, CLI, identity, runtime-control, isolation-policy,
+launcher, and QEMU smoke tests pass. The real unprivileged QEMU bridge test
+booted MOOS, ran `moos-info`, terminated/reaped `moosd` while QEMU remained
+running, started a new daemon, reconnected, ran `moos-info` again, and powered
+off cleanly. Regression coverage includes fragmented/concatenated frames,
+combined terminal ACK/output, malformed/oversized/non-object JSON, failed
+launch, failed stop, all structured states, and process-memory-independent
+console reconnect.
+Blockers: `python3 tests/managed_personal.py` was attempted but correctly
+failed its root preflight because this agent session has no non-interactive
+administrator authorization. The real systemd-managed Personal start/stop and
+daemon-restart reconnect must pass before M5 can be marked Complete. No sudo
+password was requested or stored.
+Deviations: the original in-memory PTY design was replaced by a fixed private
+QEMU Unix serial socket so reconnect does not require restarting the VM.
 
 ## Slice M6 — Versioned protocol
 

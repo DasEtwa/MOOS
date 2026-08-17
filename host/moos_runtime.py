@@ -1,15 +1,18 @@
-"""Small host-side lifecycle adapter for the single Personal MOOS runtime.
+"""Host lifecycle adapter for the single managed Personal MOOS runtime.
 
-This module deliberately delegates launch policy to the existing managed
-``run-instance.sh`` path. It does not construct QEMU arguments, expose host
-paths, or execute arbitrary commands.
+The adapter delegates the fixed launch policy to ``run-instance.sh`` and
+connects only to Personal's fixed QEMU serial socket. It never constructs
+arbitrary QEMU arguments or exposes a host command interface.
 """
 
 from __future__ import annotations
 
-import os
-import pty
+import logging
+import socket
+import stat
 import subprocess
+import threading
+import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -18,6 +21,8 @@ from typing import Callable
 
 PERSONAL_ID = "personal"
 UNIT_NAME = "moos-instance-personal.service"
+DEFAULT_CONSOLE_SOCKET = Path("/run/moos-instances/personal/console.sock")
+LOG = logging.getLogger(__name__)
 
 
 class RuntimeErrorBase(Exception):
@@ -32,6 +37,10 @@ class NotRunning(RuntimeErrorBase):
     pass
 
 
+class TerminalBusy(RuntimeErrorBase):
+    pass
+
+
 class UnsupportedOperation(RuntimeErrorBase):
     pass
 
@@ -40,6 +49,7 @@ class RuntimeState(str, Enum):
     STOPPED = "stopped"
     STARTING = "starting"
     RUNNING = "running"
+    STOPPING = "stopping"
     FAILED = "failed"
     UNKNOWN = "unknown"
 
@@ -53,7 +63,7 @@ class RuntimeStatus:
 
 @dataclass(frozen=True)
 class SerialConnection:
-    """Guest-facing connection description without leaking a host PTY path."""
+    """Guest-facing connection description without leaking a host socket path."""
 
     kind: str
     available: bool
@@ -61,124 +71,220 @@ class SerialConnection:
 
 
 class TerminalChannel:
-    """A retained PTY master used only for guest serial-console bytes."""
+    """One client connection to QEMU's reconnectable serial socket."""
 
-    def __init__(self, master_fd: int) -> None:
-        self.master_fd = master_fd
+    def __init__(self, connection: socket.socket, release: Callable[[], None]) -> None:
+        self._connection = connection
+        self._release = release
+        self._closed = False
 
     def fileno(self) -> int:
-        return self.master_fd
+        return self._connection.fileno()
 
     def read(self, size: int = 4096) -> bytes:
-        return os.read(self.master_fd, size)
+        return self._connection.recv(size)
 
     def write(self, data: bytes) -> None:
-        os.write(self.master_fd, data)
+        self._connection.sendall(data)
 
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         try:
-            os.close(self.master_fd)
-        except OSError:
-            pass
+            self._connection.close()
+        finally:
+            self._release()
 
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
 
 class PersonalRuntime:
-    """Control Personal through the already-existing managed host boundary."""
+    """Control Personal through the fixed, systemd-managed host boundary."""
 
     def __init__(
         self,
         repo_root: Path,
         *,
         runner: CommandRunner | None = None,
-        popen: Callable[..., subprocess.Popen[str]] | None = None,
+        run_instance: Path | None = None,
+        console_socket: Path = DEFAULT_CONSOLE_SOCKET,
     ) -> None:
         self.repo_root = repo_root.resolve()
-        self.run_instance = self.repo_root / "scripts" / "run-instance.sh"
+        self.run_instance = (
+            run_instance.resolve()
+            if run_instance is not None
+            else self.repo_root / "scripts" / "run-instance.sh"
+        )
+        self.console_socket = console_socket
         self._runner = runner or subprocess.run
-        self._popen = popen or subprocess.Popen
-        self._terminal: TerminalChannel | None = None
+        self._terminal_lock = threading.Lock()
+
+    def _run(self, argv: list[str]) -> subprocess.CompletedProcess[str] | None:
+        try:
+            return self._runner(
+                argv,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError:
+            LOG.exception("host lifecycle command could not be executed")
+            return None
 
     def _systemctl_state(self) -> RuntimeStatus:
-        result = self._runner(
-            ["systemctl", "show", UNIT_NAME, "--property=ActiveState", "--value"],
-            capture_output=True,
-            text=True,
-            check=False,
+        completed = self._run(
+            [
+                "systemctl",
+                "show",
+                UNIT_NAME,
+                "--property=LoadState",
+                "--property=ActiveState",
+                "--property=SubState",
+                "--property=Result",
+            ]
         )
-        if result.returncode != 0:
-            return RuntimeStatus(PERSONAL_ID, RuntimeState.STOPPED)
+        if completed is None or completed.returncode != 0:
+            return RuntimeStatus(PERSONAL_ID, RuntimeState.UNKNOWN, "status-unavailable")
 
-        active = result.stdout.strip()
-        state = {
-            "inactive": RuntimeState.STOPPED,
-            "deactivating": RuntimeState.STOPPED,
-            "activating": RuntimeState.STARTING,
-            "active": RuntimeState.RUNNING,
-            "failed": RuntimeState.FAILED,
-        }.get(active, RuntimeState.UNKNOWN)
-        return RuntimeStatus(PERSONAL_ID, state)
+        properties: dict[str, str] = {}
+        for line in completed.stdout.splitlines():
+            key, separator, value = line.partition("=")
+            if separator:
+                properties[key] = value
+
+        load = properties.get("LoadState")
+        active = properties.get("ActiveState")
+        substate = properties.get("SubState")
+        result = properties.get("Result") or None
+
+        if load == "not-found":
+            return RuntimeStatus(PERSONAL_ID, RuntimeState.STOPPED)
+        if load != "loaded" or active is None or substate is None:
+            return RuntimeStatus(PERSONAL_ID, RuntimeState.UNKNOWN, result)
+        if active == "failed" or (
+            active == "inactive" and result not in {None, "success"}
+        ):
+            return RuntimeStatus(PERSONAL_ID, RuntimeState.FAILED, result)
+        if active == "activating" or substate in {
+            "start",
+            "start-pre",
+            "start-post",
+            "auto-restart",
+        }:
+            return RuntimeStatus(PERSONAL_ID, RuntimeState.STARTING, result)
+        if active == "deactivating" or substate in {"stop", "stop-sigterm", "stop-sigkill"}:
+            return RuntimeStatus(PERSONAL_ID, RuntimeState.STOPPING, result)
+        if active == "active" and substate == "running":
+            return RuntimeStatus(PERSONAL_ID, RuntimeState.RUNNING, result)
+        if active == "inactive" and substate == "dead":
+            return RuntimeStatus(PERSONAL_ID, RuntimeState.STOPPED, result)
+        return RuntimeStatus(PERSONAL_ID, RuntimeState.UNKNOWN, result)
 
     def status(self) -> RuntimeStatus:
         return self._systemctl_state()
 
     def start(self) -> RuntimeStatus:
         current = self.status()
-        if current.state in {RuntimeState.STARTING, RuntimeState.RUNNING}:
+        if current.state in {
+            RuntimeState.STARTING,
+            RuntimeState.RUNNING,
+            RuntimeState.STOPPING,
+        }:
             raise AlreadyRunning(PERSONAL_ID)
+        if current.state == RuntimeState.UNKNOWN:
+            raise RuntimeErrorBase("Personal state is unavailable")
         if not self.run_instance.is_file():
-            raise RuntimeErrorBase(f"missing managed runner: {self.run_instance}")
+            raise RuntimeErrorBase("managed Personal runner is unavailable")
 
-        master_fd, slave_fd = pty.openpty()
-        try:
-            self._popen(
-                [str(self.run_instance), "--id", PERSONAL_ID],
-                cwd=self.repo_root,
-                stdin=slave_fd,
-                stdout=slave_fd,
-                stderr=slave_fd,
-                start_new_session=True,
-                close_fds=True,
-                text=True,
-            )
-        except BaseException:
-            os.close(master_fd)
-            raise
-        finally:
-            os.close(slave_fd)
-        self._terminal = TerminalChannel(master_fd)
-        return RuntimeStatus(PERSONAL_ID, RuntimeState.STARTING)
+        if current.state == RuntimeState.FAILED:
+            reset = self._run(["systemctl", "reset-failed", UNIT_NAME])
+            if reset is None or reset.returncode != 0:
+                raise RuntimeErrorBase("failed Personal state could not be reset")
+
+        completed = self._run([str(self.run_instance), "--id", PERSONAL_ID])
+        if completed is None or completed.returncode != 0:
+            if completed is not None:
+                LOG.error(
+                    "managed Personal launch failed with status %s: %s",
+                    completed.returncode,
+                    completed.stderr.strip(),
+                )
+            raise RuntimeErrorBase("failed to start Personal")
+
+        deadline = time.monotonic() + 3.0
+        while True:
+            status = self.status()
+            if status.state == RuntimeState.RUNNING and self._console_exists():
+                return status
+            if status.state in {
+                RuntimeState.FAILED,
+                RuntimeState.STOPPED,
+                RuntimeState.UNKNOWN,
+            }:
+                raise RuntimeErrorBase("Personal did not enter a running state")
+            if time.monotonic() >= deadline:
+                raise RuntimeErrorBase("Personal console did not become ready")
+            time.sleep(0.05)
 
     def stop(self) -> RuntimeStatus:
         current = self.status()
         if current.state == RuntimeState.STOPPED:
             raise NotRunning(PERSONAL_ID)
-        result = self._runner(
-            ["systemctl", "stop", UNIT_NAME], capture_output=True, text=True, check=False
-        )
-        if self._terminal is not None:
-            self._terminal.close()
-            self._terminal = None
-        if result.returncode != 0:
-            raise RuntimeErrorBase(result.stderr.strip() or "failed to stop Personal")
-        return RuntimeStatus(PERSONAL_ID, RuntimeState.STOPPED)
+        completed = self._run(["systemctl", "stop", UNIT_NAME])
+        if completed is None or completed.returncode != 0:
+            if completed is not None:
+                LOG.error(
+                    "managed Personal stop failed with status %s: %s",
+                    completed.returncode,
+                    completed.stderr.strip(),
+                )
+            raise RuntimeErrorBase("failed to stop Personal")
+
+        status = self.status()
+        if status.state not in {RuntimeState.STOPPED, RuntimeState.FAILED}:
+            raise RuntimeErrorBase("Personal did not stop cleanly")
+        return status
 
     def reboot(self) -> None:
-        raise UnsupportedOperation(
-            "Personal reboot is not exposed until a guest terminal channel exists"
-        )
+        raise UnsupportedOperation("Personal reboot is not exposed")
+
+    def _console_exists(self) -> bool:
+        try:
+            return stat.S_ISSOCK(self.console_socket.stat().st_mode)
+        except OSError:
+            return False
 
     def serial_connection(self) -> SerialConnection:
-        status = self.status()
+        available = self.status().state == RuntimeState.RUNNING and self._console_exists()
         return SerialConnection(
             kind="serial-console",
-            available=status.state == RuntimeState.RUNNING and self._terminal is not None,
-            interactive=self._terminal is not None,
+            available=available,
+            interactive=available,
         )
 
     def open_terminal(self) -> TerminalChannel:
-        if self.status().state != RuntimeState.RUNNING or self._terminal is None:
+        if self.status().state != RuntimeState.RUNNING:
             raise NotRunning(PERSONAL_ID)
-        return self._terminal
+        if not self._terminal_lock.acquire(blocking=False):
+            raise TerminalBusy("Personal terminal is already in use")
+
+        connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        deadline = time.monotonic() + 2.0
+        try:
+            while True:
+                try:
+                    connection.connect(str(self.console_socket))
+                    break
+                except (FileNotFoundError, ConnectionRefusedError):
+                    if time.monotonic() >= deadline:
+                        raise RuntimeErrorBase("Personal console is unavailable")
+                    time.sleep(0.05)
+                except OSError as error:
+                    raise RuntimeErrorBase("Personal console is unavailable") from error
+            return TerminalChannel(connection, self._terminal_lock.release)
+        except BaseException:
+            connection.close()
+            self._terminal_lock.release()
+            raise

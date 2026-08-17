@@ -84,9 +84,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$INSTANCE_ID" in
-    [a-z][a-z0-9-]*)
-        ;;
-    *)
+    ''|[!a-z]*|*[!a-z0-9-]*)
         echo 'error: --id must start with a lowercase letter and contain only a-z, 0-9, or -' >&2
         exit 2
         ;;

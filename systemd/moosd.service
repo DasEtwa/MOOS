@@ -1,0 +1,38 @@
+[Unit]
+Description=MOOS local control daemon
+Documentation=file:/usr/share/doc/moos/HOST_GUEST_ISOLATION.md
+Requires=moosd.socket
+After=moosd.socket systemd-user-sessions.service
+
+[Service]
+Type=simple
+User=root
+Group=moos-control
+ExecStart=/usr/lib/moos/moosd --systemd-socket --runner /usr/lib/moos/run-instance.sh
+Restart=on-failure
+RestartSec=1s
+UMask=0007
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=moosd
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

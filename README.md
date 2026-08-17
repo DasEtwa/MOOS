@@ -21,9 +21,12 @@ Verified baseline:
 - a 60 MiB ext2 image with roughly 55.1 MiB usable space
 - a dynamic green login banner with kernel, RAM, uptime, IP, and rootfs data
 - initial `moos-version`, `moos-info`, `moos-network`, and `moos-power` tools
+- a bounded local `moosd` protocol and `moos` status/start/stop/terminal client
+- a managed serial-console endpoint whose lifetime is independent of `moosd`
 
-Remote access, moosd, host control, a GUI, mobile clients, and application
-streaming are not implemented yet. Their interfaces must remain replaceable.
+Remote/Tailscale access, application authentication, a GUI, mobile clients,
+and application streaming are not implemented. `moosd` remains local-only and
+must not be exposed remotely in its current development form.
 
 ## Repository layout
 
@@ -33,10 +36,16 @@ streaming are not implemented yet. Their interfaces must remain replaceable.
 | scripts/build.sh | Fetches the pinned Buildroot revision and builds MOOS |
 | scripts/run-qemu.sh | Portable QEMU launcher for the generated image |
 | scripts/setup-runtime-user.sh | One-time root setup for the locked moos-runtime account |
+| scripts/setup-control-plane.sh | Explicitly installs socket-activated local moosd |
 | scripts/stage-instance.sh | Atomically stages kernel/rootfs files outside the repository |
 | scripts/run-instance.sh | Starts a staged Instance in a systemd cgroup |
+| host/moos_protocol.py | Incremental bounded NDJSON framing |
+| host/moos_runtime.py | Fixed Personal lifecycle/status/console adapter |
+| host/moosd.py | Typed local control and terminal service |
 | tests/qemu_smoke.py | Host-side boot, login, utility, network, and shutdown smoke test |
 | tests/qemu_launcher.py | Host-side checks for isolated QEMU defaults and rejection paths |
+| tests/qemu_terminal_bridge.py | Real QEMU/moosd terminal restart/reconnect test |
+| tests/managed_personal.py | Root-only managed Personal M5 integration test |
 | tests/runtime_isolation.py | Host-side checks for Phase 3.1 account and cgroup policy |
 | system/overlay/ | Files copied into the guest root filesystem |
 | AGENTS.md | Development rules for coding agents |
@@ -122,9 +131,8 @@ Inspect the effective defaults without starting QEMU:
 ~~~
 
 The current boundary and remaining Phase 3 work are documented in
-HOST_GUEST_ISOLATION.md. This is a rootless local QEMU baseline; a dedicated
-host runtime user, host-level cgroups, persistent Instance metadata, and
-`moosd` are not part of the plain developer launcher.
+HOST_GUEST_ISOLATION.md. The plain developer launcher remains separate from
+the dedicated runtime account, host cgroups, and local `moosd` control path.
 
 ### Phase 3.1 managed runtime
 
@@ -167,6 +175,54 @@ The managed path requires deliberate root authorization and is separate from
 the normal developer launcher. It does not expose an arbitrary host command
 argument or a remote API.
 
+### M5 local control plane
+
+M5 uses newline-delimited JSON with an incremental 16 KiB frame limit. A read
+may contain part of a frame or several frames; malformed JSON, non-object JSON,
+and oversized frames produce request-local errors instead of terminating the
+daemon. The same decoder is used for terminal input/output, including a
+terminal acknowledgment immediately followed by guest output.
+
+The managed Personal unit owns
+`/run/moos-instances/personal/console.sock`. QEMU serves its serial console on
+that socket. A terminal client disconnect or `moosd` restart closes only that
+connection; systemd continues to own QEMU, and a new daemon reconnects to the
+same console endpoint. The host path is never returned by the protocol.
+
+Install or refresh the runtime launcher, stage the stable Personal ID, and
+install the control plane only after reviewing both dry-runs:
+
+~~~bash
+./scripts/setup-runtime-user.sh --dry-run
+./scripts/setup-control-plane.sh --dry-run
+sudo ./scripts/setup-runtime-user.sh --source-root "$PWD"
+sudo ./scripts/stage-instance.sh --id personal --image-dir "$PWD/output/images"
+sudo ./scripts/setup-control-plane.sh --source-root "$PWD"
+~~~
+
+`moosd.socket` is local Unix-socket activation at `/run/moos/moosd.sock`, mode
+0660, owned by `root:moos-control`. `moosd.service` runs as
+`root:moos-control` because the managed runner requires systemd authority. It
+has an empty capability bounding set, read-only host system paths,
+no-new-privileges, a fixed operation allowlist, restart-on-failure, and
+journald logging. It creates no sudo policy. An administrator may explicitly
+add a trusted local development user to `moos-control`; that grants the narrow
+Personal API and guest console, not an arbitrary host-root shell.
+
+After a new login has picked up that group membership:
+
+~~~bash
+moos status
+moos personal start
+moos personal terminal
+moos personal stop
+journalctl -u moosd.service
+~~~
+
+The guest still has the documented blank local-development root password.
+Therefore the local socket group is security-sensitive, and neither this
+socket nor protocol is ready for Tailscale exposure.
+
 ## Phase 1/2 smoke test
 
 After building, validate the launcher policy and then run the standard host-side
@@ -176,6 +232,7 @@ smoke test:
 python3 tests/runtime_isolation.py
 python3 tests/qemu_launcher.py
 python3 tests/qemu_smoke.py
+python3 tests/qemu_terminal_bridge.py
 ~~~
 
 The runtime policy test checks the dedicated account plan, private staging,
@@ -186,6 +243,21 @@ isolated launcher with explicit user-mode networking, waits for the login
 prompt, checks the banner, kernel, BusyBox, RAM, uptime, /proc, /sys, DHCP,
 rootfs space, and writable /tmp. It also exercises the four MOOS utilities,
 reboots the guest, and verifies a clean poweroff and QEMU exit.
+
+The real terminal-bridge test uses a private mount namespace rather than
+changing host runtime state. It boots the real image, runs `moos-info` through
+`moosd`, terminates and reaps the daemon while QEMU remains alive, starts a new
+daemon, reconnects, runs `moos-info` again, and powers off cleanly. Final M5
+acceptance additionally requires the privileged managed path:
+
+~~~bash
+sudo python3 tests/managed_personal.py
+~~~
+
+That test refuses to disturb an existing Personal unit. It requires the
+root-only setup and staging above and verifies actual managed start/stop plus
+daemon-restart reconnect. M5 remains In Progress until this passes on the
+target host.
 
 ## MOOS utilities
 
