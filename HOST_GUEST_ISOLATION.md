@@ -93,12 +93,18 @@ the fixed serial launcher. Its default resource policy is:
 
 The service also enables `ProtectHome`, `ProtectProc=invisible`, and
 `ProcSubset=all` for Bubblewrap compatibility. `ProcSubset=pid` would hide
-`/proc/sys`, which Bubblewrap needs for its user-namespace setup. The service
-also enables `ProtectSystem=strict`, `PrivateDevices`, `PrivateTmp`,
+`/proc/sys`, which Bubblewrap needs for its user-namespace setup. The unit
+leaves `ProtectKernelTunables` and `ProtectKernelLogs` unset because those
+systemd proc restrictions prevent rootless Bubblewrap from creating its
+namespace-local `/proc` mount on the supported host configuration. This is a
+deliberate compatibility boundary: the process is still the unprivileged
+`moos-runtime` account, and the guest receives only Bubblewrap's synthetic
+proc/sys view rather than host kernel control. The service also enables
+`ProtectSystem=strict`, `ProtectKernelModules`, `PrivateDevices`, `PrivateTmp`,
 `NoNewPrivileges`, and group/task cleanup. The unit intentionally does not set
 an empty `CapabilityBoundingSet`: rootless Bubblewrap needs namespace-local
-capabilities for its mount setup. The service starts as the unprivileged
-`moos-runtime` account, so this does not grant host capabilities or host root.
+capabilities for its mount setup, and this does not grant host capabilities or
+host root.
 The address-family allowlist includes `AF_NETLINK` only because Bubblewrap
 needs it to configure the isolated network namespace; it does not grant the
 guest a host network interface. Guest networking remains controlled by the

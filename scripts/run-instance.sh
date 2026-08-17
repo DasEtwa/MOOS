@@ -343,9 +343,7 @@ run_managed_instance() {
             --property=ProtectProc=invisible \
             --property=ProcSubset=all \
             --property=ProtectSystem=strict \
-            --property=ProtectKernelTunables=yes \
             --property=ProtectKernelModules=yes \
-            --property=ProtectKernelLogs=yes \
             --property=ProtectControlGroups=yes \
             --property=RestrictSUIDSGID=yes \
             --property=RestrictRealtime=yes \
@@ -387,9 +385,7 @@ run_managed_instance() {
         --property=ProtectProc=invisible \
         --property=ProcSubset=all \
         --property=ProtectSystem=strict \
-        --property=ProtectKernelTunables=yes \
         --property=ProtectKernelModules=yes \
-        --property=ProtectKernelLogs=yes \
         --property=ProtectControlGroups=yes \
         --property=RestrictSUIDSGID=yes \
         --property=RestrictRealtime=yes \
