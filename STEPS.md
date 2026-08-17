@@ -367,6 +367,54 @@ Blockers: none
 Deviations: the device IPA remains unsigned and cannot be installed until a
 future signing/provisioning phase; no signing material is stored in CI.
 
+## Slice I6 — GitHub Releases and SideStore OTA channel
+
+Goal: Turn the already verified unsigned iPhoneOS build into an explicit,
+versioned SideStore update channel without moving signing into GitHub.
+
+Prerequisites: I4 complete. M7/M8 are not required because this slice changes
+distribution automation only and does not connect the app to a Host.
+
+Changes: one canonical unsigned IPA packager/validator shared by normal and
+release CI, strict Xcode/tag and built-bundle validation, explicit `ios-v*`
+release workflow, immutable GitHub Release assets, deterministic Classic
+AltSource generation with version history, GitHub Pages publication, a
+committed distribution icon, generator tests, and release documentation.
+
+Tests: iOS distribution unit tests for tag/version/build parsing, Xcode metadata,
+bundle identity, semantic history order, immutable release URLs, malformed
+metadata, marketplace-field rejection, and workflow trigger/permission rules;
+existing client-boundary, simulator, unit, and unsigned device checks remain in
+the reusable normal workflow.
+
+Completion criteria: a tag at the current default-branch tip fails closed on
+any version, test, iPhoneOS/arm64, unsigned-bundle, IPA, source-history, or Pages
+preparation error; only the publish job can create the Release; SideStore can
+consume a stable Pages source whose versions point to immutable Release assets.
+
+Status: Implemented; real publication intentionally awaits an approved tag.
+Implemented commits: `build(ios): centralize unsigned IPA packaging`,
+`feat(ios): add deterministic AltSource tooling`,
+`ci(ios): add guarded release publishing`, and
+`docs(ios): document the SideStore release channel`.
+Actual local verification: `python3 tests/ios_distribution.py`,
+`python3 tests/ios_client.py`, shell/Python syntax checks, GitHub Actions YAML
+parsing, deterministic fixture AltSource generation/validation, and
+`git diff --check` passed. The complete macOS simulator/device workflow will be
+observed after these commits are pushed.
+Manual prerequisite: enable **Settings → Pages → Build and deployment → Source:
+GitHub Actions** once. The repository Pages API currently returns no configured
+site, so no public source URL is claimed before that setting and the first real
+deployment.
+Security: normal CI is `contents: read`; only the tag-only Release job receives
+`contents: write`; Pages receives only its required scoped write/OIDC rights.
+There is no `pull_request_target`, PAT, Apple credential, certificate,
+provisioning profile, private key, signing step, live networking, or protocol
+change.
+Blockers: none in repository code. The first real tag/Release/Pages deployment
+was not performed because publication requires explicit approval.
+Deviations: none.
+
 ## Deferred mobile integration — after M7/M8
 
 - Add an authenticated Protocol v1 client only after M7 defines pairing,

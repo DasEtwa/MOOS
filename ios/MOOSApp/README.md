@@ -49,6 +49,14 @@ profiles, signing secrets, package manager, or third-party dependency bootstrap.
 The resulting IPA is a standard bundle artifact for inspection and later
 signing; it cannot be installed on an iPhone until it is signed and provisioned.
 
+An explicit `ios-v*` tag invokes the separate guarded release workflow. It
+reuses the same simulator tests and physical-device packaging path, verifies
+the tag against Xcode metadata, publishes the unsigned app as the stable
+`MOOS.ipa` GitHub Release asset, and deploys SideStore update metadata to GitHub
+Pages. Signing and installation remain entirely external in SideStore. See
+[`distribution/ios/README.md`](../../distribution/ios/README.md) for the
+one-time Pages setting and exact release procedure.
+
 The equivalent project and scheme are:
 
 ```text
