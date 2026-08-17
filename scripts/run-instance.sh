@@ -349,7 +349,6 @@ run_managed_instance() {
             --property=ProtectControlGroups=yes \
             --property=RestrictSUIDSGID=yes \
             --property=RestrictRealtime=yes \
-            --property=CapabilityBoundingSet= \
             --property=Delegate=no \
             --property=KillMode=control-group \
             --property=OOMPolicy=stop \
@@ -394,7 +393,6 @@ run_managed_instance() {
         --property=ProtectControlGroups=yes \
         --property=RestrictSUIDSGID=yes \
         --property=RestrictRealtime=yes \
-        --property=CapabilityBoundingSet= \
         --property=Delegate=no \
         --property=KillMode=control-group \
         --property=OOMPolicy=stop \

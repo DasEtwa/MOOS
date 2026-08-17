@@ -95,7 +95,10 @@ The service also enables `ProtectHome`, `ProtectProc=invisible`, and
 `ProcSubset=all` for Bubblewrap compatibility. `ProcSubset=pid` would hide
 `/proc/sys`, which Bubblewrap needs for its user-namespace setup. The service
 also enables `ProtectSystem=strict`, `PrivateDevices`, `PrivateTmp`,
-`NoNewPrivileges`, an empty capability bounding set, and group/task cleanup.
+`NoNewPrivileges`, and group/task cleanup. The unit intentionally does not set
+an empty `CapabilityBoundingSet`: rootless Bubblewrap needs namespace-local
+capabilities for its mount setup. The service starts as the unprivileged
+`moos-runtime` account, so this does not grant host capabilities or host root.
 The address-family allowlist includes `AF_NETLINK` only because Bubblewrap
 needs it to configure the isolated network namespace; it does not grant the
 guest a host network interface. Guest networking remains controlled by the
