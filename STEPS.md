@@ -146,8 +146,9 @@ Completion criteria: `MOOS Linux` and `# moos-info` work through the local bridg
 
 Do not do yet: graphical streaming or arbitrary host shell execution.
 
-Status: In Progress
-Implemented commit: `feat: bridge Personal terminal through moosd`
+Status: Complete
+Implemented commits: `feat: bridge Personal terminal through moosd`;
+`fix: harden M5 terminal and runtime lifecycle`
 Actual verification on 2026-08-17: Python compilation, shell syntax,
 `git diff --check`, protocol, CLI, identity, runtime-control, isolation-policy,
 launcher, and QEMU smoke tests pass. The real unprivileged QEMU bridge test
@@ -156,12 +157,11 @@ running, started a new daemon, reconnected, ran `moos-info` again, and powered
 off cleanly. Regression coverage includes fragmented/concatenated frames,
 combined terminal ACK/output, malformed/oversized/non-object JSON, failed
 launch, failed stop, all structured states, and process-memory-independent
-console reconnect.
-Blockers: `python3 tests/managed_personal.py` was attempted but correctly
-failed its root preflight because this agent session has no non-interactive
-administrator authorization. The real systemd-managed Personal start/stop and
-daemon-restart reconnect must pass before M5 can be marked Complete. No sudo
-password was requested or stored.
+console reconnect. The administrator-executed managed integration test then
+passed with an actual systemd-managed Personal start and login, real
+`moos-info`, daemon restart while the guest remained running, successful
+terminal reconnect, managed stop, and process reaping.
+Blockers: none
 Deviations: the original in-memory PTY design was replaced by a fixed private
 QEMU Unix serial socket so reconnect does not require restarting the VM.
 

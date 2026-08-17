@@ -247,8 +247,8 @@ reboots the guest, and verifies a clean poweroff and QEMU exit.
 The real terminal-bridge test uses a private mount namespace rather than
 changing host runtime state. It boots the real image, runs `moos-info` through
 `moosd`, terminates and reaps the daemon while QEMU remains alive, starts a new
-daemon, reconnects, runs `moos-info` again, and powers off cleanly. Final M5
-acceptance additionally requires the privileged managed path:
+daemon, reconnects, runs `moos-info` again, and powers off cleanly. The final
+M5 acceptance test uses the privileged managed path:
 
 ~~~bash
 sudo python3 tests/managed_personal.py
@@ -256,8 +256,11 @@ sudo python3 tests/managed_personal.py
 
 That test refuses to disturb an existing Personal unit. It requires the
 root-only setup and staging above and verifies actual managed start/stop plus
-daemon-restart reconnect. M5 remains In Progress until this passes on the
-target host.
+daemon-restart reconnect. It passed on the development host on 2026-08-17:
+Personal reached the real login, `moos-info` worked through the framed bridge,
+the guest stayed running across daemon restart, the terminal reconnected, and
+managed stop reaped the processes. M5 is complete; this does not make the
+local development protocol safe for remote exposure.
 
 ## MOOS utilities
 

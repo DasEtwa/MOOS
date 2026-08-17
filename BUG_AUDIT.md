@@ -294,7 +294,7 @@ on the target host.
 Severity: High
 Component: M5 local control and terminal bridge
 Category: Reliability and control-plane boundary
-Status: Code fixes and unprivileged real-QEMU reconnect verified; privileged managed acceptance pending
+Status: Resolved and verified, including privileged managed acceptance
 
 ### Findings and fixes
 
@@ -345,11 +345,12 @@ same console. `tests/qemu_terminal_bridge.py` booted the real image, ran
 remained alive, then reconnected through a new daemon and ran `moos-info`
 again.
 
-`tests/managed_personal.py` provides the final root-only managed start/stop and
-daemon-restart acceptance test. It was attempted in the current session but
-stopped at its root preflight because non-interactive sudo authorization was
-unavailable. M5 therefore remains In Progress even though the code-level High
-findings are addressed.
+The administrator-executed `tests/managed_personal.py` final acceptance test
+passed on 2026-08-17. It started the real systemd-managed Personal guest,
+reached its login, ran `moos-info` through the framed terminal, restarted and
+reaped `moosd` while the guest stayed active, reconnected the terminal, then
+stopped Personal and reaped the managed processes. The unit ended absent and
+inactive with `Result=success`. The M5 High findings are resolved.
 
 ## Area checklist
 

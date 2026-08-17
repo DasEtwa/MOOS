@@ -147,6 +147,15 @@ The deliberate Phase 3.1 test on 2026-08-17 produced these observations:
 - `/home` and `/dev/kvm` were hidden from the Guest, and the Guest process list
   contained Guest kernel/userspace processes only.
 
+The final M5 managed integration test on the same date additionally verified:
+
+- the real `personal` transient unit started QEMU and reached the MOOS login;
+- `moos-info` completed through the bounded local terminal bridge;
+- terminating and reaping `moosd` did not stop the managed guest;
+- a new daemon reconnected to the existing QEMU serial socket and terminal;
+- managed stop succeeded, processes were reaped, and the unit ended inactive
+  with `Result=success`.
+
 `/root`, `/run`, and a possible `/dev/dri` entry in the Guest are not host
 paths: they belong to the Guest filesystem or its emulated QEMU graphics
 device. The test does not claim that the future host API, shared folders, or
