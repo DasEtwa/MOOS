@@ -115,7 +115,15 @@ future mobile clients.
 
 Do not do yet: remote transport or UI logic.
 
-Status: Planned
+Status: Complete
+Implemented commit: `feat: add local moos CLI`
+Actual verification: `python3 tests/moos_cli.py`; `python3 tests/moosd_protocol.py`;
+`python3 tests/runtime_control.py`; `python3 tests/personal_identity.py`;
+`python3 tests/runtime_isolation.py`; `python3 tests/qemu_launcher.py`;
+`python3 tests/qemu_smoke.py`; Python compilation, shell syntax, and
+`git diff --check` all passed. The CLI has no QEMU lifecycle implementation.
+Blockers: none
+Deviations: none
 
 ## Slice M5 — Terminal bridge
 

@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""Small local client for the MOOS daemon."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import socket
+import sys
+from pathlib import Path
+
+
+PROTOCOL_VERSION = 1
+DEFAULT_SOCKET = Path("/run/moos/moosd.sock")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="moos")
+    parser.add_argument("--socket", type=Path, default=DEFAULT_SOCKET)
+    parser.add_argument("command", choices=("status", "personal"))
+    parser.add_argument("action", nargs="?", choices=("status", "start", "stop", "terminal"))
+    return parser.parse_args()
+
+
+def operation_for(args: argparse.Namespace) -> str:
+    if args.command == "status":
+        if args.action is not None:
+            raise ValueError("status does not accept an action")
+        return "status"
+    if args.action is None:
+        raise ValueError("personal requires status, start, stop, or terminal")
+    if args.action == "terminal":
+        raise NotImplementedError("personal terminal is available after M5")
+    return f"personal.{args.action}"
+
+
+def request(socket_path: Path, operation: str) -> dict:
+    payload = json.dumps({"protocolVersion": PROTOCOL_VERSION, "operation": operation})
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.connect(str(socket_path))
+        connection.sendall((payload + "\n").encode("utf-8"))
+        response = connection.recv(16 * 1024)
+    return json.loads(response.decode("utf-8"))
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        operation = operation_for(args)
+        response = request(args.socket, operation)
+    except (ValueError, NotImplementedError) as error:
+        print(f"moos: {error}", file=sys.stderr)
+        return 2
+    except (OSError, json.JSONDecodeError) as error:
+        print(f"moos: daemon connection failed: {error}", file=sys.stderr)
+        return 1
+
+    if not response.get("ok"):
+        error = response.get("error", {})
+        print(f"moos: {error.get('code', 'error')}: {error.get('message', 'request failed')}", file=sys.stderr)
+        return 1
+    print(json.dumps(response["data"], indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
