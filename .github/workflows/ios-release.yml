@@ -121,7 +121,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          EXISTING_RELEASE_IDS="$(gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | .id")"
+          if [[ -n "$EXISTING_RELEASE_IDS" ]]; then
             echo "Release already exists for $RELEASE_TAG; refusing to replace immutable assets" >&2
             exit 1
           fi
@@ -290,24 +293,39 @@ jobs:
           set -euo pipefail
           PAYLOAD_ROOT="$RUNNER_TEMP/release-payload"
           RELEASE_RECORD="$RUNNER_TEMP/draft-release.json"
+          PUBLISHED_RECORD="$RUNNER_TEMP/published-release.json"
           DRAFT_CREATED=false
+          find_draft_ids() {
+            gh api --paginate \
+              "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq ".[] | select(.draft == true and .tag_name == \"$RELEASE_TAG\") | .id"
+          }
           cleanup_draft() {
             status=$?
             trap - EXIT
             if [[ "$DRAFT_CREATED" == true ]]; then
-              gh release delete "$RELEASE_TAG" \
-                --repo "$GITHUB_REPOSITORY" \
-                --yes || true
+              while IFS= read -r release_id; do
+                if [[ "$release_id" =~ ^[1-9][0-9]*$ ]]; then
+                  gh api --method DELETE \
+                    "repos/$GITHUB_REPOSITORY/releases/$release_id" || true
+                fi
+              done < <(find_draft_ids || true)
             fi
             exit "$status"
           }
           trap cleanup_draft EXIT
 
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          EXISTING_RELEASE_IDS="$(gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | .id")"
+          if [[ -n "$EXISTING_RELEASE_IDS" ]]; then
             echo "Release already exists for $RELEASE_TAG; refusing to replace assets" >&2
             exit 1
           fi
+          DRAFT_CREATED=true
           gh release create "$RELEASE_TAG" \
+            "$PAYLOAD_ROOT/MOOS.ipa" \
+            "$PAYLOAD_ROOT/MOOS-alt-source.json" \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --draft \
@@ -315,12 +333,13 @@ jobs:
             --generate-notes \
             --notes-file "$PAYLOAD_ROOT/release-notes.md"
 
-          DRAFT_CREATED=true
-          gh release upload "$RELEASE_TAG" \
-            "$PAYLOAD_ROOT/MOOS.ipa" \
-            "$PAYLOAD_ROOT/MOOS-alt-source.json" \
-            --repo "$GITHUB_REPOSITORY"
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+          mapfile -t RELEASE_IDS < <(find_draft_ids)
+          if [[ "${#RELEASE_IDS[@]}" -ne 1 || ! "${RELEASE_IDS[0]}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Expected exactly one numeric draft release ID for $RELEASE_TAG" >&2
+            exit 1
+          fi
+          RELEASE_ID="${RELEASE_IDS[0]}"
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
             > "$RELEASE_RECORD"
           python3 - "$RELEASE_RECORD" "$PAYLOAD_ROOT" "$RELEASE_TAG" <<'PY'
           import json
@@ -344,9 +363,19 @@ jobs:
           # From here on, preserve an uncertain draft rather than risking deletion
           # after GitHub may already have accepted the publication request.
           DRAFT_CREATED=false
-          gh release edit "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --draft=false
+          gh api --method PATCH \
+            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            -F draft=false > "$PUBLISHED_RECORD"
+          python3 - "$PUBLISHED_RECORD" "$RELEASE_TAG" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          release = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert release["draft"] is False
+          assert release["prerelease"] is False
+          assert release["tag_name"] == sys.argv[2]
+          PY
           trap - EXIT
 
   deploy-alt-source:
