@@ -35,3 +35,21 @@ The connected app and the reconnecting/offline previews still use mock data.
 Offline snapshots deliberately retain cached widgets and apps. The Protocol v1
 request type is transport-independent; there is still no network transport,
 pairing, credential, or live backend client in this project.
+
+## Build verification
+
+`.github/workflows/ios.yml` selects Xcode 16.4 on a GitHub-hosted `macos-15`
+runner, builds for the iPhone 16 / iOS 18.5 simulator, and then runs the unit
+tests without rebuilding. Both commands disable code signing. The workflow uses
+no Apple certificates, provisioning profiles, signing secrets, package manager,
+or third-party dependency bootstrap.
+
+The equivalent project and scheme are:
+
+```text
+project: ios/MOOSApp/MOOSApp.xcodeproj
+scheme:  MOOSApp
+```
+
+The workflow must be observed after the branch is pushed or opened as a pull
+request; local Linux validation cannot execute Xcode or an iOS simulator.

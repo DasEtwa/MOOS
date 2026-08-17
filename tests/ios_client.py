@@ -8,6 +8,7 @@ from xml.etree import ElementTree
 REPO_ROOT = Path(__file__).resolve().parents[1]
 IOS_ROOT = REPO_ROOT / "ios" / "MOOSApp"
 PROJECT = IOS_ROOT / "MOOSApp.xcodeproj" / "project.pbxproj"
+WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ios.yml"
 SCHEME = (
     IOS_ROOT
     / "MOOSApp.xcodeproj"
@@ -71,10 +72,27 @@ def main() -> None:
     assert "static let version = 1" in combined_sources
 
     assert not list(IOS_ROOT.rglob("Package.resolved")), "unexpected dependency lockfile"
+
+    workflow_text = WORKFLOW.read_text()
+    for requirement in (
+        "runs-on: macos-15",
+        "/Applications/Xcode_16.4.app/Contents/Developer",
+        "actions/checkout@v6",
+        "persist-credentials: false",
+        "python3 tests/ios_client.py",
+        "CODE_SIGNING_ALLOWED=NO",
+        "build-for-testing",
+        "test-without-building",
+    ):
+        assert requirement in workflow_text, f"iOS CI is missing {requirement}"
+    assert "secrets." not in workflow_text.lower()
+    assert "brew " not in workflow_text.lower()
+
     print("MOOS iOS client structure test: PASS")
     print(f"  Swift sources referenced by project: {len(swift_sources)}")
     print("  host implementation details absent from client: ok")
     print("  third-party dependencies: none")
+    print("  unsigned macOS/Xcode CI workflow: configured")
 
 
 if __name__ == "__main__":

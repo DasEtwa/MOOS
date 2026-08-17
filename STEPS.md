@@ -344,7 +344,17 @@ commits are pushed.
 Completion criteria: CI is configured to build and test the project with code
 signing disabled and no secrets.
 
-Status: Planned
+Status: Implemented; awaiting first hosted run
+Implemented commit: `ci: verify iOS shell without signing`
+Actual verification: `python3 tests/ios_client.py`, GitHub Actions YAML parsing,
+`python3 tests/protocol_contract.py`, `python3 tests/runtime_isolation.py`,
+Python compilation, shared-scheme XML validation, and `git diff --check` passed.
+The workflow uses `macos-15`, Xcode 16.4, an iPhone 16 / iOS 18.5 simulator,
+`build-for-testing`, and `test-without-building` with code signing disabled.
+Blockers: the hosted Xcode build cannot run until these local commits are pushed
+or opened as a pull request. No build success is claimed yet.
+Deviations: no build artifact is uploaded; build and test verification are the
+only initial CI outputs.
 
 ## Deferred mobile integration — after M7/M8
 

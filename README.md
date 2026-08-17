@@ -45,6 +45,7 @@ local-only and must not be exposed remotely in its current development form.
 | host/moos_runtime.py | Fixed Personal lifecycle/status/console adapter |
 | host/moosd.py | Typed local control and terminal service |
 | ios/MOOSApp/ | Native SwiftUI shell project; mock-only until M7/M8 |
+| .github/workflows/ios.yml | Unsigned iOS simulator build and unit-test CI |
 | tests/qemu_smoke.py | Host-side boot, login, utility, network, and shutdown smoke test |
 | tests/qemu_launcher.py | Host-side checks for isolated QEMU defaults and rejection paths |
 | tests/qemu_terminal_bridge.py | Real QEMU/moosd terminal restart/reconnect test |
