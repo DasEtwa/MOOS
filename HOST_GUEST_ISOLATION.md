@@ -96,6 +96,10 @@ The service also enables `ProtectHome`, `ProtectProc=invisible`, and
 `/proc/sys`, which Bubblewrap needs for its user-namespace setup. The service
 also enables `ProtectSystem=strict`, `PrivateDevices`, `PrivateTmp`,
 `NoNewPrivileges`, an empty capability bounding set, and group/task cleanup.
+The address-family allowlist includes `AF_NETLINK` only because Bubblewrap
+needs it to configure the isolated network namespace; it does not grant the
+guest a host network interface. Guest networking remains controlled by the
+launcher’s explicit `none` or `user` mode.
 I/O is denied if the storage block device cannot be resolved; pass
 `--io-device /dev/...` explicitly in that case. `--direct` and arbitrary QEMU
 arguments are not available through the managed runner.

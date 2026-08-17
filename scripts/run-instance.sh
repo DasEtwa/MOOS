@@ -354,7 +354,7 @@ run_managed_instance() {
             --property=KillMode=control-group \
             --property=OOMPolicy=stop \
             --property=UMask=0077 \
-            --property='RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6' \
+            --property='RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK' \
             -- \
             "$LIBEXEC_ROOT/run-qemu.sh" \
             --serial-only \
@@ -399,7 +399,7 @@ run_managed_instance() {
         --property=KillMode=control-group \
         --property=OOMPolicy=stop \
         --property=UMask=0077 \
-        --property='RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6' \
+        --property='RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK' \
         -- \
         "$LIBEXEC_ROOT/run-qemu.sh" \
         --serial-only \
