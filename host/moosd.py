@@ -13,13 +13,15 @@ from pathlib import Path
 from typing import Any
 
 from moos_protocol import (
-    PROTOCOL_VERSION,
+    ByteTransport,
     FrameDecoder,
     FrameResult,
     ProtocolError,
     TerminalClose,
     TerminalInput,
     encode_frame,
+    make_control_error,
+    make_control_success,
     make_terminal_error,
     make_terminal_output,
     parse_control_request,
@@ -95,21 +97,11 @@ class MoosdService:
 
     @staticmethod
     def _ok(operation: str, data: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "protocolVersion": PROTOCOL_VERSION,
-            "ok": True,
-            "operation": operation,
-            "data": data,
-            "events": [],
-        }
+        return make_control_success(operation, data)
 
     @staticmethod
     def _error(code: str, message: str) -> dict[str, Any]:
-        return {
-            "protocolVersion": PROTOCOL_VERSION,
-            "ok": False,
-            "error": {"code": code, "message": message},
-        }
+        return make_control_error(code, message)
 
 
 def serve(
@@ -162,7 +154,7 @@ def _request_error(result: FrameResult) -> dict[str, Any]:
     return MoosdService._error("invalid_request", "request must be one JSON object")
 
 
-def _send(connection: socket.socket, frame: dict[str, Any]) -> bool:
+def _send(connection: ByteTransport, frame: dict[str, Any]) -> bool:
     try:
         connection.sendall(encode_frame(frame))
         return True
@@ -177,6 +169,9 @@ def _handle_client(connection: socket.socket, service: MoosdService) -> None:
             while True:
                 data = connection.recv(READ_BYTES)
                 if not data:
+                    final = decoder.finish()
+                    if final is not None:
+                        _send(connection, _request_error(final))
                     return
                 results = decoder.feed(data)
                 for index, result in enumerate(results):
@@ -265,6 +260,9 @@ def _serve_terminal(
             if connection in readable:
                 data = connection.recv(READ_BYTES)
                 if not data:
+                    final = decoder.finish()
+                    if final is not None:
+                        _handle_terminal_results(connection, channel, [final])
                     return
                 if not _handle_terminal_results(connection, channel, decoder.feed(data)):
                     return

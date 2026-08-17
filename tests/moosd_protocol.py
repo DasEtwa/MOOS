@@ -13,7 +13,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "host"))
 
-from moos_protocol import MAX_FRAME_BYTES, FrameDecoder, encode_frame  # noqa: E402
+from moos_protocol import (  # noqa: E402
+    MAX_FRAME_BYTES,
+    PROTOCOL_VERSION,
+    FrameDecoder,
+    encode_frame,
+)
 from moos_runtime import (  # noqa: E402
     AlreadyRunning,
     NotRunning,
@@ -21,7 +26,7 @@ from moos_runtime import (  # noqa: E402
     RuntimeStatus,
     TerminalChannel,
 )
-from moosd import MoosdService, PROTOCOL_VERSION, serve  # noqa: E402
+from moosd import MoosdService, serve  # noqa: E402
 
 
 class FakeRuntime:
@@ -111,6 +116,11 @@ def main():
     assert response(service, {"protocolVersion": 99, "operation": "status"})[
         "error"
     ]["code"] == "unsupported_protocol"
+    for invalid_version in (True, 1.0):
+        assert response(
+            service,
+            {"protocolVersion": invalid_version, "operation": "status"},
+        )["error"]["code"] == "unsupported_protocol"
     assert response(service, {"protocolVersion": 1, "operation": "exec"})["error"][
         "code"
     ] == "unknown_operation"
@@ -164,6 +174,13 @@ def main():
             assert frames[0]["error"]["code"] == "request_too_large"
             assert frames[1]["ok"] is True
 
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.connect(str(socket_path))
+            connection.sendall(b'{"protocolVersion":1')
+            connection.shutdown(socket.SHUT_WR)
+            truncated = receive_frames(connection, 1)[0]
+            assert truncated["error"]["code"] == "invalid_request"
+
         runtime.state = RuntimeState.RUNNING
         open_frame = encode_frame(
             {"protocolVersion": 1, "operation": "personal.terminal.open"}
@@ -208,6 +225,21 @@ def main():
             connection.sendall(encode_frame({"type": "close"}))
             guest.close()
 
+        deadline = time.monotonic() + 2
+        while runtime.closed_channels < 2 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert runtime.closed_channels >= 2
+
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.connect(str(socket_path))
+            connection.sendall(open_frame + b'{"type":"input"')
+            assert receive_frames(connection, 1)[0]["ok"] is True
+            guest = wait_for_channel(runtime)
+            connection.shutdown(socket.SHUT_WR)
+            terminal_error = receive_frames(connection, 1)[0]
+            assert terminal_error == {"type": "error", "code": "invalid_frame"}
+            guest.close()
+
     combined = encode_frame({"ok": True}) + encode_frame(
         {"type": "output", "data": "boot"}
     )
@@ -224,7 +256,8 @@ def main():
     print("  fragmented and concatenated bounded request frames: ok")
     print("  fragmented/combined response decoding: ok")
     print("  invalid JSON values and malformed/oversized JSON stay client-local: ok")
-    print("  invalid/fragmented terminal input, output, disconnect, and reconnect: ok")
+    print("  truncated control and terminal frames return structured errors: ok")
+    print("  strict versions and terminal disconnect/reconnect behavior: ok")
     print(f"  protocol version: {PROTOCOL_VERSION}")
     return 0
 

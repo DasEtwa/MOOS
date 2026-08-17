@@ -19,11 +19,19 @@ if not MODULE_ROOT.is_dir():
 sys.path.insert(0, str(MODULE_ROOT))
 
 from moos_protocol import (  # noqa: E402
-    PROTOCOL_VERSION,
+    ByteTransport,
+    ControlFailure,
+    ControlSuccess,
     FrameDecoder,
     FrameResult,
+    TerminalError,
+    TerminalOutput,
     encode_frame,
     make_control_request,
+    make_terminal_close,
+    make_terminal_input,
+    parse_control_response,
+    parse_terminal_response,
 )
 
 
@@ -50,7 +58,7 @@ def operation_for(args: argparse.Namespace) -> str:
 
 
 def _receive_frame(
-    connection: socket.socket,
+    connection: ByteTransport,
     decoder: FrameDecoder,
     pending: deque[FrameResult],
 ) -> dict:
@@ -62,30 +70,31 @@ def _receive_frame(
             return result.frame
         data = connection.recv(READ_BYTES)
         if not data:
+            final = decoder.finish()
+            if final is not None:
+                raise ValueError("daemon sent a truncated protocol frame")
             raise ConnectionError("daemon closed before sending a response")
         pending.extend(decoder.feed(data))
 
 
-def request(socket_path: Path, operation: str) -> dict:
+def request(socket_path: Path, operation: str) -> ControlSuccess | ControlFailure:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
         connection.connect(str(socket_path))
         connection.sendall(
             encode_frame(make_control_request(operation))
         )
-        return _receive_frame(connection, FrameDecoder(), deque())
+        frame = _receive_frame(connection, FrameDecoder(), deque())
+        return parse_control_response(frame, expected_operation=operation)
 
 
 def _write_terminal_frame(frame: dict) -> bool:
-    frame_type = frame.get("type")
-    if frame_type == "output" and isinstance(frame.get("data"), str):
-        sys.stdout.write(frame["data"])
+    terminal_frame = parse_terminal_response(frame)
+    if isinstance(terminal_frame, TerminalOutput):
+        sys.stdout.write(terminal_frame.data)
         sys.stdout.flush()
         return True
-    if frame_type == "error":
-        print(
-            f"moos: terminal error: {frame.get('code', 'error')}",
-            file=sys.stderr,
-        )
+    if isinstance(terminal_frame, TerminalError):
+        print(f"moos: terminal error: {terminal_frame.code}", file=sys.stderr)
         return False
     raise ValueError("daemon sent an invalid terminal frame")
 
@@ -98,10 +107,15 @@ def terminal(socket_path: Path) -> int:
         )
         decoder = FrameDecoder()
         pending: deque[FrameResult] = deque()
-        acknowledgment = _receive_frame(connection, decoder, pending)
-        if not acknowledgment.get("ok"):
-            error = acknowledgment.get("error", {})
-            print(f"moos: {error.get('code', 'error')}: {error.get('message', 'request failed')}", file=sys.stderr)
+        acknowledgment = parse_control_response(
+            _receive_frame(connection, decoder, pending),
+            expected_operation="personal.terminal.open",
+        )
+        if isinstance(acknowledgment, ControlFailure):
+            print(
+                f"moos: {acknowledgment.code}: {acknowledgment.message}",
+                file=sys.stderr,
+            )
             return 1
         while True:
             while pending:
@@ -114,13 +128,16 @@ def terminal(socket_path: Path) -> int:
             if sys.stdin in readable:
                 data = os.read(sys.stdin.fileno(), 2048)
                 if not data:
-                    connection.sendall(encode_frame({"type": "close"}))
+                    connection.sendall(encode_frame(make_terminal_close()))
                     return 0
-                frame = {"type": "input", "data": data.decode("utf-8", errors="replace")}
+                frame = make_terminal_input(data.decode("utf-8", errors="replace"))
                 connection.sendall(encode_frame(frame))
             if connection in readable:
                 data = connection.recv(READ_BYTES)
                 if not data:
+                    final = decoder.finish()
+                    if final is not None:
+                        raise ValueError("daemon sent a truncated terminal frame")
                     return 0
                 pending.extend(decoder.feed(data))
                 while pending:
@@ -141,19 +158,19 @@ def main() -> int:
             return 1
     try:
         operation = operation_for(args)
-        response = request(args.socket, operation)
     except ValueError as error:
         print(f"moos: {error}", file=sys.stderr)
         return 2
-    except (OSError, ConnectionError) as error:
+    try:
+        response = request(args.socket, operation)
+    except (OSError, ConnectionError, ValueError) as error:
         print(f"moos: daemon connection failed: {error}", file=sys.stderr)
         return 1
 
-    if not response.get("ok"):
-        error = response.get("error", {})
-        print(f"moos: {error.get('code', 'error')}: {error.get('message', 'request failed')}", file=sys.stderr)
+    if isinstance(response, ControlFailure):
+        print(f"moos: {response.code}: {response.message}", file=sys.stderr)
         return 1
-    print(json.dumps(response["data"], indent=2, sort_keys=True))
+    print(json.dumps(response.data.as_dict(), indent=2, sort_keys=True))
     return 0
 
 

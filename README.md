@@ -230,7 +230,9 @@ socket nor protocol is ready for Tailscale exposure.
 The local control plane now has an explicit transport-neutral Protocol v1
 contract in `PROTOCOL.md`. It defines the bounded NDJSON wire format, typed
 Personal status/lifecycle/terminal frames, structured errors, compatibility
-rules, and the public runtime states. The current Unix socket remains the only
+rules, and the public runtime states. Both daemon and CLI validate exact integer
+versions and operation-specific response shapes; incomplete frames remain
+isolated to their connection. The current Unix socket remains the only
 transport; authentication and Tailscale are intentionally deferred to M7/M8.
 
 ## Phase 1/2 smoke test

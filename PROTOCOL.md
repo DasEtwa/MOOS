@@ -14,6 +14,9 @@ exposing QEMU, systemd, filesystem, or process details.
 - The encoded JSON object is limited to 16 KiB, excluding the newline.
 - Invalid, non-object, truncated, or oversized frames produce structured local
   errors and must not terminate the daemon.
+- When a peer half-closes its write side after an incomplete frame, the Host
+  returns the structured error before closing its read side. A full disconnect
+  is isolated to that client because no response channel remains.
 - The current transport is local Unix `SOCK_STREAM` only. No TCP, Tailscale, or
   public listener is part of v1.
 
@@ -24,6 +27,9 @@ Every control request contains exactly:
 ```json
 {"protocolVersion":1,"operation":"status"}
 ```
+
+`protocolVersion` is exactly the JSON integer `1`. Booleans, strings, and
+fractional numbers such as `true`, `"1"`, and `1.0` are not version 1.
 
 The supported operations are:
 
@@ -59,8 +65,10 @@ Successful responses have this shape:
 ```
 
 The public runtime states are `starting`, `running`, `stopping`, `stopped`,
-`failed`, and `unknown`. `result` is an optional public system outcome such as
-`success` or `exit-code`; implementation-specific paths and PIDs are excluded.
+`failed`, and `unknown`. `result` may be omitted or `null`; otherwise it is a
+public outcome string such as `success` or `exit-code`. Implementation-specific
+paths and PIDs are excluded. `events` is an array of event objects and is empty
+for the operations currently implemented.
 
 Terminal-open success returns only:
 
@@ -91,6 +99,11 @@ Defined control error codes are `unsupported_protocol`, `invalid_request`,
 `terminal_busy`, and `runtime_error`. Clients must handle unknown future codes
 as generic errors.
 
+Clients validate `protocolVersion`, the boolean `ok`, and the operation-specific
+response data before using it. Unknown response fields are ignored. A response
+for a different operation does not satisfy the outstanding request. Complete
+requests sent on one control stream receive responses in the same order.
+
 ## Terminal channel
 
 After a successful `personal.terminal.open`, the same stream carries terminal
@@ -112,7 +125,8 @@ Host to client:
 
 Terminal error codes are `invalid_frame`, `frame_too_large`, and
 `terminal_unavailable`. Clients must treat unknown future codes as generic
-terminal failures.
+terminal failures and ignore unknown fields on Host-to-client terminal frames.
+The Host rejects unknown fields on client-to-Host terminal frames.
 
 Terminal input is delivered only to the Personal guest console. Closing the
 client channel does not stop Personal. A new client may open a new channel
@@ -121,7 +135,8 @@ time by the current host runtime.
 
 ## Compatibility rules
 
-- `protocolVersion` is mandatory and unsupported versions are rejected.
+- `protocolVersion` is mandatory, must be an integer, and unsupported versions
+  are rejected by both Host and client.
 - v1 clients must ignore unknown response fields such as future event fields.
 - v1 servers reject unknown request fields rather than guessing their meaning.
 - Unknown error codes are forward-compatible generic errors.

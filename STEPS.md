@@ -181,7 +181,8 @@ Completion criteria: a non-UI client can use the documented protocol.
 Do not do yet: public exposure or final mobile UI assumptions.
 
 Status: Complete
-Implemented commit: `feat: define MOOS Protocol v1`
+Implemented commits: `feat: define MOOS Protocol v1`;
+`fix: enforce M6 protocol contracts`
 Actual verification: `python3 tests/protocol_contract.py`; `python3 tests/moosd_protocol.py`;
 `python3 tests/moos_cli.py`; `python3 tests/runtime_control.py`;
 `python3 tests/personal_identity.py`; `python3 tests/runtime_isolation.py`;
@@ -189,7 +190,10 @@ Actual verification: `python3 tests/protocol_contract.py`; `python3 tests/moosd_
 `python3 tests/qemu_terminal_bridge.py`; Python compilation, shell syntax, and
 `git diff --check` all passed. Protocol v1 is documented in `PROTOCOL.md`,
 centralizes framing/version/typed validation, and does not expose a remote
-transport or Host internals.
+transport or Host internals. Follow-up hardening added strict integer-version
+checks, typed operation-specific response validation in daemon and CLI,
+structured truncated-frame handling at socket EOF, response compatibility
+checks, and exact frame-size boundary coverage.
 Blockers: none
 Deviations: M6 formalizes the Protocol v1 contract already exercised by the
 hardened M5 local transport; it does not open a new network transport.
