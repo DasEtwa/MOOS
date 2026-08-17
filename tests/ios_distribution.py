@@ -17,6 +17,17 @@ SCRIPTS = REPO_ROOT / "scripts"
 PROJECT = REPO_ROOT / "ios" / "MOOSApp" / "MOOSApp.xcodeproj" / "project.pbxproj"
 TEMPLATE = REPO_ROOT / "distribution" / "ios" / "source-template.json"
 ICON = REPO_ROOT / "distribution" / "ios" / "icon.png"
+APP_ICON = (
+    REPO_ROOT
+    / "ios"
+    / "MOOSApp"
+    / "MOOSApp"
+    / "Resources"
+    / "Assets.xcassets"
+    / "AppIcon.appiconset"
+    / "AppIcon-1024.png"
+)
+APP_ICON_CONTENTS = APP_ICON.parent / "Contents.json"
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ios.yml"
 RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ios-release.yml"
 sys.path.insert(0, str(SCRIPTS))
@@ -34,10 +45,6 @@ def load_script(name: str, path: Path):
 
 metadata = load_script("ios_release_metadata", SCRIPTS / "ios_release_metadata.py")
 alt_source = load_script("generate_ios_alt_source", SCRIPTS / "generate-ios-alt-source.py")
-icon_generator = load_script(
-    "generate_ios_distribution_icon",
-    SCRIPTS / "generate-ios-distribution-icon.py",
-)
 
 
 class ReleaseMetadataTests(unittest.TestCase):
@@ -202,12 +209,27 @@ class AltSourceTests(unittest.TestCase):
             self.assertEqual(first.read_bytes(), second.read_bytes())
             self.assertTrue(first.read_bytes().endswith(b"\n"))
 
-    def test_committed_icon_is_deterministic_png(self) -> None:
+    def test_committed_icon_is_valid_and_shared_with_the_app(self) -> None:
         content = ICON.read_bytes()
-        self.assertEqual(content, icon_generator.render_png())
+        self.assertEqual(content, APP_ICON.read_bytes())
         self.assertEqual(content[:8], b"\x89PNG\r\n\x1a\n")
         self.assertEqual(int.from_bytes(content[16:20], "big"), 1024)
         self.assertEqual(int.from_bytes(content[20:24], "big"), 1024)
+        self.assertEqual(content[24], 8)
+        self.assertEqual(content[25], 2, "app icon must be RGB without alpha")
+
+        catalog = json.loads(APP_ICON_CONTENTS.read_text(encoding="utf-8"))
+        self.assertEqual(
+            catalog["images"],
+            [
+                {
+                    "filename": "AppIcon-1024.png",
+                    "idiom": "universal",
+                    "platform": "ios",
+                    "size": "1024x1024",
+                }
+            ],
+        )
 
 
 class ReleaseWorkflowTests(unittest.TestCase):

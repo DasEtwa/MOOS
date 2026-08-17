@@ -47,7 +47,7 @@ remotely in its current development form.
 | host/moos_runtime.py | Fixed Personal lifecycle/status/console adapter |
 | host/moosd.py | Typed local control and terminal service |
 | ios/MOOSApp/ | Native SwiftUI shell project; mock-only until M7/M8 |
-| distribution/ios/ | Deterministic SideStore AltSource seed, icon, and release guide |
+| distribution/ios/ | Deterministic SideStore AltSource seed, release icon, and guide |
 | .github/workflows/ios.yml | Unsigned simulator tests and physical-device IPA build CI |
 | .github/workflows/ios-release.yml | Explicit-tag GitHub Release and Pages publication |
 | tests/qemu_smoke.py | Host-side boot, login, utility, network, and shutdown smoke test |

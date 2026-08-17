@@ -149,7 +149,8 @@ replaced as a retry mechanism.
 release workflow takes the previous Release's `MOOS-alt-source.json` when one
 exists, prepends the new version, validates it, publishes the snapshot as a
 Release asset, and deploys the same JSON to Pages. `icon.png` is committed and
-its deterministic bytes are covered by:
+is an exact copy of the app's 1024×1024 RGB asset-catalog icon. Both copies and
+the catalog metadata are covered by:
 
 ```bash
 python3 tests/ios_distribution.py

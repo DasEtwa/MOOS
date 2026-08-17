@@ -18,6 +18,14 @@ SCHEME = (
     / "xcschemes"
     / "MOOSApp.xcscheme"
 )
+APP_ICON = (
+    IOS_ROOT
+    / "MOOSApp"
+    / "Resources"
+    / "Assets.xcassets"
+    / "AppIcon.appiconset"
+    / "AppIcon-1024.png"
+)
 
 
 def main() -> None:
@@ -25,6 +33,9 @@ def main() -> None:
     project_text = PROJECT.read_text()
     assert "IPHONEOS_DEPLOYMENT_TARGET = 17.0" in project_text
     assert "PRODUCT_BUNDLE_IDENTIFIER = dev.moos.shell" in project_text
+    assert project_text.count("ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;") == 2
+    assert "Assets.xcassets in Resources" in project_text
+    assert APP_ICON.is_file(), "iOS app icon is missing"
     assert project_text.count("{") == project_text.count("}"), "unbalanced project"
     ElementTree.parse(SCHEME)
 

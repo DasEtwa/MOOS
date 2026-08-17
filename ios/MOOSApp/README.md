@@ -12,7 +12,8 @@ added after M7/M8.
 
 Open `MOOSApp.xcodeproj` in Xcode and run the `MOOSApp` scheme on an iPhone
 simulator. The deployment target is iOS 17.0 and the project has no third-party
-dependencies.
+dependencies. The committed `AppIcon` asset catalog uses the same MOOS artwork
+that is published with the SideStore source.
 
 The current Home is entirely local: it renders mock Luna/Sol and resource
 widgets, an app grid, connection/time/session indicators, and the experimental
