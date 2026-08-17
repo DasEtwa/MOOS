@@ -122,6 +122,8 @@ def main() -> None:
         "CFBundleIdentifier",
         "CFBundleShortVersionString",
         "CFBundleVersion",
+        "_CodeSignature",
+        "embedded.mobileprovision",
     ):
         assert validation_requirement in device_validator_text, (
             f"canonical iOS validator is missing {validation_requirement}"

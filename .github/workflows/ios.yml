@@ -2,16 +2,35 @@ name: iOS
 
 on:
   push:
+    branches:
+      - "**"
     paths:
       - "ios/**"
+      - "distribution/ios/**"
       - ".github/workflows/ios.yml"
+      - ".github/workflows/ios-release.yml"
+      - "scripts/build-ios-ipa.sh"
+      - "scripts/generate-ios-alt-source.py"
+      - "scripts/generate-ios-distribution-icon.py"
+      - "scripts/ios_release_metadata.py"
+      - "scripts/validate-ios-app.sh"
       - "tests/ios_client.py"
+      - "tests/ios_distribution.py"
   pull_request:
     paths:
       - "ios/**"
+      - "distribution/ios/**"
       - ".github/workflows/ios.yml"
+      - ".github/workflows/ios-release.yml"
+      - "scripts/build-ios-ipa.sh"
+      - "scripts/generate-ios-alt-source.py"
+      - "scripts/generate-ios-distribution-icon.py"
+      - "scripts/ios_release_metadata.py"
+      - "scripts/validate-ios-app.sh"
       - "tests/ios_client.py"
+      - "tests/ios_distribution.py"
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -38,6 +57,9 @@ jobs:
 
       - name: Validate client boundaries
         run: python3 tests/ios_client.py
+
+      - name: Validate distribution tooling
+        run: python3 tests/ios_distribution.py
 
       - name: Build for iPhone simulator
         run: |

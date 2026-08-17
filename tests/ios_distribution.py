@@ -17,6 +17,8 @@ SCRIPTS = REPO_ROOT / "scripts"
 PROJECT = REPO_ROOT / "ios" / "MOOSApp" / "MOOSApp.xcodeproj" / "project.pbxproj"
 TEMPLATE = REPO_ROOT / "distribution" / "ios" / "source-template.json"
 ICON = REPO_ROOT / "distribution" / "ios" / "icon.png"
+CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ios.yml"
+RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ios-release.yml"
 sys.path.insert(0, str(SCRIPTS))
 
 
@@ -89,6 +91,19 @@ class ReleaseMetadataTests(unittest.TestCase):
             )
             with self.assertRaises(metadata.MetadataError):
                 metadata.load_project_metadata(project)
+
+    def test_previous_release_selection_uses_semantic_order(self) -> None:
+        self.assertEqual(
+            metadata.select_previous_release_tag(
+                "1.0.0", ["ios-v0.2.0", "ios-v0.10.0", "ios-v0.9.5"]
+            ),
+            "ios-v0.10.0",
+        )
+        self.assertEqual(metadata.select_previous_release_tag("0.1.0", []), "")
+        with self.assertRaises(metadata.MetadataError):
+            metadata.select_previous_release_tag("0.2.0", ["ios-v0.2.0"])
+        with self.assertRaises(metadata.MetadataError):
+            metadata.select_previous_release_tag("0.2.0", ["ios-v0.3.0"])
 
 
 class AltSourceTests(unittest.TestCase):
@@ -193,6 +208,46 @@ class AltSourceTests(unittest.TestCase):
         self.assertEqual(content[:8], b"\x89PNG\r\n\x1a\n")
         self.assertEqual(int.from_bytes(content[16:20], "big"), 1024)
         self.assertEqual(int.from_bytes(content[20:24], "big"), 1024)
+
+
+class ReleaseWorkflowTests(unittest.TestCase):
+    def test_normal_ci_cannot_publish(self) -> None:
+        workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn('branches:\n      - "**"', workflow)
+        self.assertIn("pull_request:", workflow)
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertIn("workflow_call:", workflow)
+        self.assertIn("python3 tests/ios_client.py", workflow)
+        self.assertIn("python3 tests/ios_distribution.py", workflow)
+        self.assertIn("build-for-testing", workflow)
+        self.assertIn("test-without-building", workflow)
+        self.assertIn("./scripts/build-ios-ipa.sh", workflow)
+        self.assertNotIn("contents: write", workflow)
+        self.assertNotIn("gh release create", workflow)
+        self.assertNotIn("deploy-pages", workflow)
+
+    def test_release_is_tag_only_and_least_privilege(self) -> None:
+        workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn('tags:\n      - "ios-v*"', workflow)
+        self.assertNotIn("pull_request:", workflow)
+        self.assertNotIn("pull_request_target:", workflow)
+        self.assertNotIn("workflow_dispatch:", workflow)
+        self.assertEqual(workflow.count("contents: write"), 1)
+        self.assertEqual(workflow.count("pages: write"), 1)
+        self.assertEqual(workflow.count("id-token: write"), 1)
+        self.assertIn("uses: ./.github/workflows/ios.yml", workflow)
+        self.assertIn('[[ "$RELEASE_SHA" != "$DEFAULT_SHA" ]]', workflow)
+        self.assertIn("scripts/validate-ios-app.sh", workflow)
+        self.assertIn("scripts/generate-ios-alt-source.py", workflow)
+        self.assertIn("gh release create", workflow)
+        self.assertIn("--generate-notes", workflow)
+        self.assertIn("actions/configure-pages@v6", workflow)
+        self.assertIn("actions/upload-pages-artifact@v5", workflow)
+        self.assertIn("actions/deploy-pages@v5", workflow)
+        self.assertIn("actions/download-artifact@v8", workflow)
+        self.assertNotIn("secrets.", workflow.lower())
+        self.assertNotIn("latest/download", workflow)
+        self.assertNotIn("actions/artifacts", workflow)
 
 
 if __name__ == "__main__":

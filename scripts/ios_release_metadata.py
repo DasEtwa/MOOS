@@ -143,6 +143,19 @@ def validate_project_tag(project_path: Path, tag: str) -> ProjectMetadata:
     return metadata
 
 
+def select_previous_release_tag(current_version: str, release_tags: list[str]) -> str:
+    current = parse_semantic_version(current_version)
+    previous: list[tuple[tuple[int, int, int], str]] = []
+    for tag in release_tags:
+        version = parse_semantic_version(parse_release_tag(tag))
+        if version >= current:
+            raise MetadataError(
+                f"existing release {tag} is not older than ios-v{current_version}"
+            )
+        previous.append((version, tag))
+    return max(previous)[1] if previous else ""
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -155,12 +168,28 @@ def _build_parser() -> argparse.ArgumentParser:
     validate_parser.add_argument(
         "--format", choices=("json", "github"), default="json", dest="output_format"
     )
+
+    previous_parser = subparsers.add_parser(
+        "select-previous-release",
+        help="select the greatest older semantic version from published release tags",
+    )
+    previous_parser.add_argument("--current-version", required=True)
+    previous_parser.add_argument("--tags-file", required=True, type=Path)
     return parser
 
 
 def main() -> int:
     args = _build_parser().parse_args()
     try:
+        if args.command == "select-previous-release":
+            tags = [
+                line.strip()
+                for line in args.tags_file.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            print(select_previous_release_tag(args.current_version, tags))
+            return 0
+
         metadata = validate_project_tag(args.project, args.tag)
     except (MetadataError, OSError) as error:
         raise SystemExit(f"release metadata validation failed: {error}") from error

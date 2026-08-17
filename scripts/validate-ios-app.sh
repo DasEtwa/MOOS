@@ -47,6 +47,14 @@ app_binary=$app_path/MOOSApp
 info_plist=$app_path/Info.plist
 [ -x "$app_binary" ] || { echo "iOS app executable not found: $app_binary" >&2; exit 1; }
 [ -f "$info_plist" ] || { echo "iOS app Info.plist not found: $info_plist" >&2; exit 1; }
+[ ! -e "$app_path/_CodeSignature" ] || {
+    echo "refusing a signed app bundle: $app_path/_CodeSignature exists" >&2
+    exit 1
+}
+[ ! -e "$app_path/embedded.mobileprovision" ] || {
+    echo "refusing an app bundle with an embedded provisioning profile" >&2
+    exit 1
+}
 
 architectures=$(xcrun lipo -archs "$app_binary")
 [ "$architectures" = arm64 ] || {
