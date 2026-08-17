@@ -9,6 +9,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 IOS_ROOT = REPO_ROOT / "ios" / "MOOSApp"
 PROJECT = IOS_ROOT / "MOOSApp.xcodeproj" / "project.pbxproj"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ios.yml"
+DEVICE_BUILDER = REPO_ROOT / "scripts" / "build-ios-ipa.sh"
+DEVICE_VALIDATOR = REPO_ROOT / "scripts" / "validate-ios-app.sh"
 SCHEME = (
     IOS_ROOT
     / "MOOSApp.xcodeproj"
@@ -74,6 +76,8 @@ def main() -> None:
     assert not list(IOS_ROOT.rglob("Package.resolved")), "unexpected dependency lockfile"
 
     workflow_text = WORKFLOW.read_text()
+    device_builder_text = DEVICE_BUILDER.read_text()
+    device_validator_text = DEVICE_VALIDATOR.read_text()
     for requirement in (
         "runs-on: macos-15",
         "/Applications/Xcode_16.4.app/Contents/Developer",
@@ -88,23 +92,39 @@ def main() -> None:
 
     for device_requirement in (
         "build-unsigned-device:",
-        "-sdk iphoneos",
-        "-destination 'generic/platform=iOS'",
-        "Release-iphoneos/MOOSApp.app",
-        "ARCHS=arm64",
-        "xcrun lipo -archs",
-        "xcrun vtool -show-build",
-        "platform IOS$",
-        "platform IOSSIMULATOR$",
-        "DTPlatformName",
-        'test "$PLATFORM_NAME" = "iphoneos"',
-        "Payload/MOOSApp.app",
+        "./scripts/build-ios-ipa.sh",
         "MOOS.ipa",
         "actions/upload-artifact@v7",
         "MOOS-unsigned-iphoneos-arm64",
     ):
         assert device_requirement in workflow_text, (
             f"iOS device CI is missing {device_requirement}"
+        )
+
+    for build_requirement in (
+        "-sdk iphoneos",
+        "-destination 'generic/platform=iOS'",
+        "Release-iphoneos/MOOSApp.app",
+        "ARCHS=arm64",
+        "CODE_SIGNING_ALLOWED=NO",
+        "Payload/MOOSApp.app",
+    ):
+        assert build_requirement in device_builder_text, (
+            f"canonical IPA builder is missing {build_requirement}"
+        )
+
+    for validation_requirement in (
+        "xcrun lipo -archs",
+        "xcrun vtool -show-build",
+        "platform IOS$",
+        "platform IOSSIMULATOR$",
+        "DTPlatformName",
+        "CFBundleIdentifier",
+        "CFBundleShortVersionString",
+        "CFBundleVersion",
+    ):
+        assert validation_requirement in device_validator_text, (
+            f"canonical iOS validator is missing {validation_requirement}"
         )
     assert "secrets." not in workflow_text.lower()
     assert "brew " not in workflow_text.lower()
