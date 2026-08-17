@@ -1,0 +1,61 @@
+# MOOS/Buildroot generated workspace. These trees can be many gigabytes.
+/buildroot/
+/output/
+/host-tools/
+/dl/
+
+# Generated kernel, root filesystem, and QEMU artifacts outside output/.
+/images/
+/qemu-run/
+*.ext2
+*.img
+*.qcow2
+*.raw
+*.bzImage
+
+# Compiler and language build products.
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+/target/
+/staging/
+/sysroot/
+/target-rootfs/
+/build/
+
+# Logs, caches, and local runtime state.
+*.log
+*.pid
+*.sock
+.cache/
+.pytest_cache/
+__pycache__/
+
+# Editor and operating-system metadata.
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Future language/tooling outputs.
+target/
+.build/
+DerivedData/
+.venv/
+venv/
+
+# Local configuration and credentials. Keep examples explicitly trackable.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.mobileprovision
+*.provisionprofile
+secrets/
+credentials/
