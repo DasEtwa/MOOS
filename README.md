@@ -156,7 +156,7 @@ sudo ./scripts/run-instance.sh --id luna
 ~~~
 
 This creates a transient systemd service for `moos-runtime` with a 200% CPU
-quota, 2 GiB cgroup memory limit, 512 host tasks, 10 MiB/s read/write I/O
+quota, 2 GiB cgroup memory limit, 512 host tasks, 10 MB/s read/write I/O
 limits, 1792 MiB guest memory, two vCPUs, no network, private devices, and
 `ProtectHome=yes`. If the storage device cannot be detected, provide it
 explicitly with `--io-device /dev/...`. The runtime account itself never gets

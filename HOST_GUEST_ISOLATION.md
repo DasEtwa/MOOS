@@ -88,7 +88,7 @@ the fixed serial launcher. Its default resource policy is:
 | Host tasks | `TasksMax=512` |
 | Guest memory | `1792M`, leaving QEMU overhead below the cgroup ceiling |
 | vCPUs | 2 |
-| I/O | 10 MiB/s read and write on the storage block device |
+| I/O | 10 MB/s read and write on the storage block device (10,000,000 bytes/s) |
 | Network | off; `--network user` remains explicit |
 
 The service also enables `ProtectHome`, `ProtectProc=invisible`, and
