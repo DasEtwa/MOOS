@@ -45,6 +45,8 @@ Thumbs.db
 target/
 .build/
 DerivedData/
+xcuserdata/
+*.xcuserstate
 .venv/
 venv/
 

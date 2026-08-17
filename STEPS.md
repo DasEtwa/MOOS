@@ -245,84 +245,100 @@ Status: Planned
 
 ## Slice I1 — Native iOS project foundation
 
-Goal: Add a native Swift/SwiftUI MOOS Mobile project with replaceable views.
+Goal: Add a native Swift/SwiftUI MOOS shell with replaceable presentation and
+mock-only client state.
 
-Prerequisites: M6 protocol shape; M8 is needed for live connectivity.
+Prerequisites: M6 protocol concepts. M7/M8 are not required for local UI work.
 
-Changes: branding, connection state, Host/Personal status, and placeholder
-Terminal/Files/Apps/Settings tiles. Only Terminal will eventually function.
+Changes: independent `ios/` Xcode project, client-facing Host/Personal/
+Connection/App models, mock state service, minimal MOOS Home, and placeholder
+Terminal/Files/Settings destinations.
 
-Tests: Xcode project validation and simulator build where available.
+Tests: source-boundary checks, Xcode project validation, unit tests and an
+unsigned simulator build where Xcode is available.
 
-Completion criteria: project opens/builds without embedding Host internals.
+Completion criteria: the project opens/builds without embedding Host runtime
+internals or implementing transport.
 
-Do not do yet: graphical streaming or final radial/ring navigation.
+Do not do yet: authentication, remote networking, streaming, or final visual
+navigation decisions.
 
-Status: Planned
+Status: Complete
+Implemented commit: `feat: add native iOS project foundation`
+Actual verification: `python3 tests/ios_client.py`,
+`python3 tests/protocol_contract.py`, `python3 tests/runtime_isolation.py`,
+Python compilation, shared-scheme XML validation, and `git diff --check` passed.
+The Linux development host does not have Swift or Xcode, so the unsigned
+simulator build is intentionally deferred to the macOS CI added in I4.
+Blockers: none
+Deviations: none
 
-## Slice I2 — GitHub Actions iOS build
+## Slice I2 — Native shell components
 
-Goal: Build unsigned simulator/app artifacts on macOS CI without local Mac
-requirements.
+Goal: Demonstrate the local MOOS desktop experience using cheap, reusable
+SwiftUI components and mock data.
 
 Prerequisites: I1 complete.
 
-Changes: workflow, dependency-free build verification, artifact documentation.
+Changes: widgets, app grid, MOOS tap menu, replaceable radial-menu prototype,
+and bottom system bar with non-destructive placeholders.
 
-Tests: GitHub Actions build; no signing secrets in Git.
+Tests: component/model unit tests, source-boundary checks, and an unsigned
+simulator build where Xcode is available.
 
-Completion criteria: CI can verify the project without Apple credentials.
-
-Status: Planned
-
-## Slice I3 — Mobile protocol client
-
-Goal: Implement the iPhone-side authenticated versioned client.
-
-Prerequisites: M6, M7, I1.
-
-Changes: configured Host, protocol check, Host/Personal state, reconnect and
-clear offline/error states; credentials in Keychain.
-
-Tests: client protocol tests independent of SwiftUI.
+Completion criteria: Home visibly demonstrates desktop, widgets, apps, radial
+navigation, and system controls without streaming Linux UI.
 
 Status: Planned
 
-## Slice I4 — Native MOOS Home
+## Slice I3 — Cache and resilient state boundaries
 
-Goal: Render the first local/native MOOS shell on iPhone.
+Goal: Keep the local shell useful while remote state is unavailable or stale.
+
+Prerequisites: I2 complete.
+
+Changes: explicit local/cached/live data classes, local cache abstractions,
+mock/live service boundaries, reconnect/offline presentation, locally advanced
+uptime, and version-ready icon metadata.
+
+Tests: cache/service/state unit tests, source-boundary checks, and an unsigned
+simulator build where Xcode is available.
+
+Completion criteria: cached metadata remains visible during disconnects and
+live state can later be event-driven without changing SwiftUI views.
+
+Status: Planned
+
+## Slice I4 — GitHub Actions iOS build
+
+Goal: Verify the native shell on a GitHub-hosted macOS/Xcode runner without
+Apple signing credentials.
 
 Prerequisites: I3 complete.
 
-Changes: flexible Home view showing Personal, Host, connection quality and
-Terminal/Files/Apps/Settings entry points.
+Changes: dependency-free workflow, unsigned simulator build/test, and build
+documentation.
 
-Tests: state rendering and offline/reconnect UI tests.
+Tests: workflow/static validation locally and GitHub Actions build after the
+commits are pushed.
 
-Do not do yet: hard-code radial navigation or stream a Linux desktop.
-
-Status: Planned
-
-## Slice I5 — Native Terminal / mobile MVP stop point
-
-Goal: Connect SwiftUI Terminal to the real Personal terminal channel.
-
-Prerequisites: M8, I3, I4, and M5.
-
-Changes: keyboard, scrolling output, connect/disconnect/reconnect, monospace
-rendering, and basic ANSI support if practical.
-
-Tests: real iPhone runs `moos-info`, `moos-version`, and `moos-network` in the
-actual Personal guest; disconnect does not stop the guest.
-
-Completion criteria: the real iPhone reaches Personal MOOS over Tailscale and
-shows `moos-info` output.
+Completion criteria: CI is configured to build and test the project with code
+signing disabled and no secrets.
 
 Status: Planned
 
-STOP: After I5 succeeds on a real iPhone, stop and review the experience.
+## Deferred mobile integration — after M7/M8
 
-## Future roadmap — do not implement before I5 review
+- Add an authenticated Protocol v1 client only after M7 defines pairing,
+  credential storage, authorization, and revocation.
+- Add the Tailscale-carried remote transport only after M8 exposes a reviewed
+  authenticated endpoint; never proxy the current local socket directly.
+- Connect a native Terminal UI to the real Personal terminal only after those
+  boundaries pass real-device tests. Client disconnect must not stop Personal.
+- Review the native shell experiment before committing to radial navigation,
+  streaming, or broader application behavior.
+
+## Future roadmap — do not implement before deferred mobile integration review
 
 - F1 Native Files UI for Personal guest files only.
 - F2 Structured guest control service and typed Host↔Guest IPC.
