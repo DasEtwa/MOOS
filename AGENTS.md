@@ -54,6 +54,19 @@ These rules are especially important for future remote access:
   application authentication or authorization.
 - Keep the current blank-password root login restricted to local development.
 
+For host runtime isolation:
+
+- Keep `moos-runtime` setup root-only, explicit, idempotent, and inspectable via
+  a dry-run.
+- Keep runtime storage and staged QEMU files root-owned and read-only to the
+  runtime account unless a narrowly justified write capability is documented.
+- Apply CPU, memory, task, and I/O limits outside the guest process, using the
+  host's cgroup manager where available.
+- Do not add arbitrary QEMU arguments, host paths, device passthrough, or
+  credentials to the managed Instance runner.
+- Never make a build or guest script silently create host accounts, modify
+  sudo policy, or change host cgroups.
+
 ## Architecture boundaries
 
 Keep these layers distinct:

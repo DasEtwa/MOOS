@@ -147,15 +147,17 @@ Status: Verified
 
 ### Finding
 
-The image uses QEMU user-mode networking and DHCP on eth0. The guest received
-an address in the QEMU user network during testing. No host directory is shared
+The default launcher has no guest network device. With the explicit
+`--network user` option, QEMU supplies user-mode NAT and the smoke test performs
+DHCP on eth0 after login. No host port forwarding or host directory is shared
 with the guest by the current launcher.
 
 ### Significance
 
 This is suitable for the current local smoke test and limits direct host
-network integration, but it is not a remote-access design. Future host services
-must define their own authentication, authorization, and isolation.
+network integration, but the explicit user-mode network still gives QEMU
+outbound host-network capability and is not a remote-access design. Future host
+services must define their own authentication, authorization, and isolation.
 
 ## MOOS-0006
 
@@ -212,6 +214,78 @@ When work begins, keep host control separate from guest control, authenticate
 and authorize every operation, encrypt transport, and avoid arbitrary host root
 execution.
 
+## MOOS-0009
+
+Severity: Observation
+Component: host/guest boundary
+Category: Current behavior
+Status: Verified
+
+### Finding
+
+The default serial launcher runs QEMU through a rootless bubblewrap namespace.
+Only the QEMU runtime files and selected image files are mounted into the
+sandbox. `/home`, `/root`, `/run`, arbitrary repository paths, host devices,
+and host sockets are not mounted. QEMU uses TCG, one vCPU, 256 MiB by default,
+and a temporary rootfs snapshot.
+
+### Significance
+
+The current boundary protects the host from ordinary guest filesystem access
+and avoids exposing KVM, USB, GPU, clipboard, or shared-folder capabilities by
+default. This is a local QEMU baseline, not yet a complete multi-Instance host
+runtime.
+
+## MOOS-0010
+
+Severity: Future Risk
+Component: QEMU hardening
+Category: Host/guest isolation
+Status: Not an active bug
+
+### Finding
+
+The Buildroot-provided host QEMU binary was checked locally and does not have
+QEMU's optional `-sandbox` seccomp support enabled. The current boundary relies
+on rootless bubblewrap namespaces, TCG, explicit image mounts, and the absence
+of host device bindings.
+
+### Significance
+
+A future hardened runtime should evaluate a QEMU build with seccomp support or
+an equivalent external policy. The new Phase 3.1 runtime path adds an external
+systemd/cgroup policy, but this QEMU limitation remains until seccomp or an
+equivalent policy is deliberately evaluated.
+
+## MOOS-0011
+
+Severity: Observation
+Component: host runtime setup
+Category: Phase 3.1 activation
+Status: Implemented in repository; host activation pending
+
+### Finding
+
+The repository contains root-only setup and launch scripts for a dedicated
+`moos-runtime` system account. The setup uses a locked `nologin` account with
+no supplementary groups, private `/var/lib/moos` storage, and a root-owned
+launcher copy. Instance staging copies only the kernel and root filesystem.
+The managed launcher creates a transient systemd service with `CPUQuota=200%`,
+`MemoryMax=2G`, `TasksMax=512`, automatic or explicit block-device I/O limits,
+`ProtectHome`, `ProtectSystem=strict`, `PrivateDevices`, and no new privileges.
+
+The privileged setup has not been run automatically on the current developer
+machine. The policy test validates command generation and rejection paths; it
+does not prove that a host administrator has activated the account or that the
+host's systemd policy accepts every property.
+
+### Significance
+
+This keeps host-account creation and cgroup enforcement explicit and
+reproducible without silently changing the developer's machine. A managed
+Instance must not be treated as protected by these controls until the setup is
+reviewed, activated, and checked with `systemctl status` and cgroup inspection.
+
 ## Area checklist
 
 | Area | Audit result |
@@ -221,12 +295,12 @@ execution.
 | QEMU startup | Boot verified; generated launcher had an absolute path and is replaced by a portable wrapper. |
 | Filesystem permissions | Generated target files are build intermediates owned by the host until fakeroot image creation; final image creation was verified. |
 | Init | BusyBox init and Buildroot init scripts run; serial and tty1 gettys are intentional. |
-| Networking | DHCP on eth0 through QEMU user networking works; no remote service exists. |
+| Networking | Default is disabled; explicit QEMU user networking plus DHCP works; no remote service exists. |
 | Shell/login | Root login and dynamic banner work; blank root password is unsafe outside development. |
 | Hard-coded paths | Generated launcher/config contained a developer path; tracked scripts avoid it. |
 | Generated artifacts | buildroot/, output/, and host tools are large generated/local state and must stay ignored. |
 | Temporary files | Buildroot creates temporary files under its ignored output/build trees; no tracked temporary file was found. |
-| Host/guest boundaries | No shared host directory is configured; future management services need explicit least-privilege boundaries. |
+| Host/guest boundaries | Rootless QEMU sandbox verified; Phase 3.1 runtime account/cgroup activation is explicit and not automatic; host IPC remains future work. |
 | Secret exposure | No secret or credential was found; the empty root password is an insecure configuration, not a leaked secret. |
 | Developer-machine assumptions | Original launcher and generated config depended on the original absolute checkout path; portable scripts remove that dependency. |
 
