@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Regression-test bounded moosd framing and terminal protocol behavior."""
 
+import os
 import socket
 import stat
 import sys
@@ -26,6 +27,7 @@ from moos_runtime import (  # noqa: E402
     RuntimeStatus,
     TerminalChannel,
 )
+import moosd  # noqa: E402
 from moosd import MoosdService, serve  # noqa: E402
 
 
@@ -103,6 +105,38 @@ def main():
     service = MoosdService(runtime)
 
     assert response(service, {"protocolVersion": 1, "operation": "status"})["ok"]
+    gateway_status = service.dispatch(
+        {"protocolVersion": 1, "operation": "status"},
+        allowed_operations=frozenset({"status"}),
+    ).response
+    assert gateway_status["ok"] is True
+    gateway_stop = service.dispatch(
+        {"protocolVersion": 1, "operation": "personal.stop"},
+        allowed_operations=frozenset({"status"}),
+    ).response
+    assert gateway_stop["error"]["code"] == "forbidden"
+    assert runtime.calls == ["status", "status"]
+
+    original_gateway_uids = moosd._gateway_uids
+    moosd._gateway_uids = lambda: frozenset({os.getuid()})
+    client_side, daemon_side = socket.socketpair()
+    gateway_thread = threading.Thread(
+        target=moosd._handle_client,
+        args=(daemon_side, service),
+        daemon=True,
+    )
+    gateway_thread.start()
+    try:
+        client_side.sendall(
+            encode_frame({"protocolVersion": 1, "operation": "personal.stop"})
+        )
+        peer_denied = receive_frames(client_side, 1)[0]
+        assert peer_denied["error"]["code"] == "forbidden"
+        assert runtime.calls == ["status", "status"]
+    finally:
+        client_side.close()
+        gateway_thread.join(timeout=2)
+        moosd._gateway_uids = original_gateway_uids
     assert response(service, {"protocolVersion": 1, "operation": "personal.start"})["ok"]
     duplicate = response(service, {"protocolVersion": 1, "operation": "personal.start"})
     assert duplicate["error"]["code"] == "already_running"

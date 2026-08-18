@@ -208,12 +208,15 @@ create and stop the unprivileged instance service. Membership in
 sudo rule is installed. Runtime socket directories are managed by systemd,
 and daemon code is installed root-owned under `/usr/lib/moos`.
 
-This is local authorization, not remote authentication. The guest's current
-blank development root password makes terminal access especially sensitive.
-Do not publish `/run/moos/moosd.sock`, proxy it over Tailscale, or treat
-Tailscale identity as sufficient application authorization. A later remote
-service must add explicit authenticated, authorized, encrypted operations
-without changing the host/guest boundary.
+The local socket is not published remotely. `moos-gateway` is a separate,
+unprivileged entry point that binds only to an explicit Tailscale address,
+authenticates an individually revocable MOOS device key, authorizes every
+operation, and forwards only validated Protocol-v1 frames. Tailscale supplies
+the encrypted transport but is not treated as MOOS device identity. Gateway v1
+remotely permits only `status`; `moosd` also enforces that restriction from the
+Gateway's Unix peer UID. Lifecycle and terminal operations remain local. The
+guest's blank development root password therefore remains unreachable from the
+remote Gateway.
 
 Runtime status is derived from systemd `LoadState`, `ActiveState`, `SubState`,
 and `Result`, producing `starting`, `running`, `stopping`, `stopped`, `failed`,
@@ -242,7 +245,7 @@ silently fall back to it.
 - define and validate a narrow host/guest IPC contract
 - add negative tests for path traversal, unauthorized operations, and cleanup
 - make persistent Instance storage portable and separately backupable
-- replace local group trust with an authenticated/authorized remote boundary
+- extend remote grants only after operation-specific authorization review
 
 Until those items exist, MOOS has a safe local QEMU baseline, not a complete
 production-grade multi-Instance host manager.
