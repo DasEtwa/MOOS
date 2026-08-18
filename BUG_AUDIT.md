@@ -200,20 +200,24 @@ clear in future size reports.
 Severity: Future Risk
 Component: remote architecture
 Category: Remote boundary
-Status: Local control implemented; remote exposure remains prohibited
+Status: Status-only authenticated Gateway implemented; broader exposure prohibited
 
 ### Finding
 
-The repository now has a local Unix-socket `moosd` with fixed Personal
-status/start/stop/terminal operations. It does not have remote application
-authentication, Tailscale integration, a mobile client, or streaming.
+The repository has a local Unix-socket `moosd` with fixed Personal
+status/start/stop/terminal operations. A separate unprivileged Gateway now
+provides per-device authenticated and authorized `status` over Tailscale to the
+native iOS client. Remote lifecycle, terminal, streaming, and public-network
+exposure remain absent.
 
 ### Significance
 
-The local daemon is not a remote endpoint. Host control remains separate from
-guest serial input, arbitrary host execution is absent, and the socket is
-restricted to a dedicated local group. Any later remote boundary must
-authenticate and authorize every operation and encrypt transport.
+The local daemon remains unavailable as a remote endpoint. Host control stays
+separate from guest serial input, arbitrary host execution is absent, and the
+socket is restricted to a dedicated local group. The Gateway authenticates and
+authorizes each device, permits only `status`, and relies on Tailscale for its
+encrypted transport. Any broader remote operation still requires a separate
+operation-specific security review.
 
 ## MOOS-0009
 
@@ -361,12 +365,12 @@ inactive with `Result=success`. The M5 High findings are resolved.
 | QEMU startup | Boot verified; generated launcher had an absolute path and is replaced by a portable wrapper. |
 | Filesystem permissions | Generated target files are build intermediates owned by the host until fakeroot image creation; final image creation was verified. |
 | Init | BusyBox init and Buildroot init scripts run; serial and tty1 gettys are intentional. |
-| Networking | Default is disabled; explicit QEMU user networking plus DHCP works; local moosd is not a remote service. |
+| Networking | Default guest networking is disabled; explicit QEMU user networking plus DHCP works; local moosd is not a remote service, while the separate authenticated Gateway exposes status only over Tailscale. |
 | Shell/login | Root login and dynamic banner work; blank root password is unsafe outside development. |
 | Hard-coded paths | Generated launcher/config contained a developer path; tracked scripts avoid it. |
 | Generated artifacts | buildroot/, output/, and host tools are large generated/local state and must stay ignored. |
 | Temporary files | Buildroot creates temporary files under its ignored output/build trees; no tracked temporary file was found. |
-| Host/guest boundaries | Rootless QEMU sandbox and one real Phase 3.1 activation verified; M5 adds only a fixed local serial socket and typed local broker. |
+| Host/guest boundaries | Rootless QEMU sandbox and one real Phase 3.1 activation verified; the Gateway remains outside the guest and is independently restricted to status by the typed local broker. |
 | Secret exposure | No secret or credential was found; the empty root password is an insecure configuration, not a leaked secret. |
 | Developer-machine assumptions | Original launcher and generated config depended on the original absolute checkout path; portable scripts remove that dependency. |
 

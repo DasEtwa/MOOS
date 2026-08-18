@@ -24,12 +24,13 @@ Verified baseline:
 - a bounded local `moosd` protocol and `moos` status/start/stop/terminal client
 - a managed serial-console endpoint whose lifetime is independent of `moosd`
 
-Remote/Tailscale access, application authentication, authenticated mobile
-connectivity, and application streaming are not implemented. A native iOS shell
-prototype exists under `ios/` and uses mock data only. Its unsigned GitHub
-Release/SideStore distribution path is prepared, without adding app signing or
-remote connectivity. `moosd` remains local-only and must not be exposed
-remotely in its current development form.
+Authenticated status access over Tailscale is implemented through a separate,
+status-only `moos-gateway`; `moosd` itself remains local-only. The native iOS
+app under `ios/` starts empty, imports a per-device pairing credential into the
+Keychain, performs Gateway and Protocol-v1 negotiation, and renders the real
+Personal state. Remote terminal/lifecycle control, application streaming, and
+device signing remain unimplemented. Its unsigned GitHub Release/SideStore
+distribution path is prepared without storing signing material.
 
 ## Repository layout
 
@@ -46,7 +47,7 @@ remotely in its current development form.
 | PROTOCOL.md | Versioned Protocol v1 contract and compatibility rules |
 | host/moos_runtime.py | Fixed Personal lifecycle/status/console adapter |
 | host/moosd.py | Typed local control and terminal service |
-| ios/MOOSApp/ | Native SwiftUI shell project; mock-only until M7/M8 |
+| ios/MOOSApp/ | Native SwiftUI client with authenticated Gateway status |
 | distribution/ios/ | Deterministic SideStore AltSource seed, release icon, and guide |
 | .github/workflows/ios.yml | Unsigned simulator tests and physical-device IPA build CI |
 | .github/workflows/ios-release.yml | Explicit-tag GitHub Release and Pages publication |
@@ -55,6 +56,8 @@ remotely in its current development form.
 | tests/qemu_terminal_bridge.py | Real QEMU/moosd terminal restart/reconnect test |
 | tests/managed_personal.py | Root-only managed Personal M5 integration test |
 | tests/protocol_contract.py | Protocol v1 schema, error, and size contract test |
+| tests/gateway_auth.py | Device pairing, challenge, revocation, and rotation test |
+| tests/gateway_protocol.py | Authenticated status forwarding and authorization test |
 | tests/runtime_isolation.py | Host-side checks for Phase 3.1 account and cgroup policy |
 | system/overlay/ | Files copied into the guest root filesystem |
 | AGENTS.md | Development rules for coding agents |
@@ -229,8 +232,9 @@ journalctl -u moosd.service
 ~~~
 
 The guest still has the documented blank local-development root password.
-Therefore the local socket group is security-sensitive, and neither this
-socket nor protocol is ready for Tailscale exposure.
+Therefore the local socket group is security-sensitive and must never be
+exposed directly. Remote status uses the separate status-only authenticated
+Gateway described below.
 
 ### M6 Protocol v1
 
@@ -239,8 +243,24 @@ contract in `PROTOCOL.md`. It defines the bounded NDJSON wire format, typed
 Personal status/lifecycle/terminal frames, structured errors, compatibility
 rules, and the public runtime states. Both daemon and CLI validate exact integer
 versions and operation-specific response shapes; incomplete frames remain
-isolated to their connection. The current Unix socket remains the only
-transport; authentication and Tailscale are intentionally deferred to M7/M8.
+isolated to their connection. The Unix socket remains `moosd`'s only transport.
+The separate MOOS Gateway adds a Tailscale-only listener, per-device
+challenge authentication, revocation, rotation, and status-only authorization
+without exposing the local daemon socket.
+
+Install it only after Tailscale and the local control plane are working:
+
+~~~bash
+sudo ./scripts/setup-gateway.sh \
+  --tailscale-address "$(tailscale ip -4)" \
+  --port 7411
+sudo moos-gateway-device add --name "My iPhone" --allow status
+~~~
+
+The second command prints a pairing code once. Enter that code with the Host's
+Tailscale address and port in the iOS app. Device keys are stored in the iOS
+Keychain and the root-managed Host device store; they are never committed.
+See `GATEWAY.md` for the exact handshake and authorization boundary.
 
 ## Phase 1/2 smoke test
 
@@ -318,9 +338,9 @@ The current layers are intentionally small:
 3. The overlay adds MOOS-specific guest files.
 4. The host launcher starts the guest without exposing a host directory.
 
-Future host services and remote APIs must be designed around explicit,
-authenticated, least-privilege operations. Tailscale may provide transport
-reachability later, but it is not application authentication.
+Future host services and remote APIs must retain explicit, authenticated,
+least-privilege operations. The Gateway uses Tailscale for encrypted transport
+reachability, never as application authentication.
 
 See AGENTS.md and rules.md for contribution rules, BUG_AUDIT.md for known
 findings, HOST_GUEST_ISOLATION.md for the security boundary, and STEPS.md for
