@@ -3,6 +3,7 @@
 
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -42,11 +43,32 @@ def main():
     require("account state: locked, no supplementary groups", setup, "account lock")
     require("host mutation: none (dry-run)", setup, "setup dry-run")
 
-    staged = run(STAGE, "--id", "luna", "--dry-run")
-    require("instance: luna", staged, "Instance ID")
-    require("root:moos-runtime, mode 0750", staged, "root-owned Instance storage")
-    require("mode 0440", staged, "read-only staged images")
-    require("host mutation: none (dry-run)", staged, "staging dry-run")
+    with tempfile.TemporaryDirectory() as temporary:
+        fixture_root = Path(temporary)
+        image_dir = fixture_root / "images"
+        qemu_bin = fixture_root / "qemu-host" / "bin" / "qemu-system-x86_64"
+        image_dir.mkdir()
+        qemu_bin.parent.mkdir(parents=True)
+        (fixture_root / "qemu-host" / "lib").mkdir()
+        (fixture_root / "qemu-host" / "share" / "qemu").mkdir(parents=True)
+        (image_dir / "bzImage").touch()
+        (image_dir / "rootfs.ext2").touch()
+        qemu_bin.touch(mode=0o700)
+
+        staged = run(
+            STAGE,
+            "--id",
+            "luna",
+            "--image-dir",
+            str(image_dir),
+            "--qemu",
+            str(qemu_bin),
+            "--dry-run",
+        )
+        require("instance: luna", staged, "Instance ID")
+        require("root:moos-runtime, mode 0750", staged, "root-owned Instance storage")
+        require("mode 0440", staged, "read-only staged images")
+        require("host mutation: none (dry-run)", staged, "staging dry-run")
 
     managed = run(RUN_INSTANCE, "--id", "luna", "--dry-run")
     require("runtime user: moos-runtime:moos-runtime", managed, "runtime identity")
