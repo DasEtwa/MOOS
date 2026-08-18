@@ -243,7 +243,7 @@ final class MOOSAppTests: XCTestCase {
             store: store,
             credentialStore: credentials,
             connector: TestConnector(result: .success(connection)),
-            pollIntervalNanoseconds: UInt64.max,
+            pollIntervalNanoseconds: 60_000_000_000,
             gatewayClientNonce: Data(repeating: 4, count: 32)
         )
 
