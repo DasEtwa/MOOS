@@ -65,14 +65,14 @@ class ReleaseMetadataTests(unittest.TestCase):
 
     def test_project_metadata_and_bundle_identifier(self) -> None:
         project_metadata = metadata.load_project_metadata(PROJECT)
-        self.assertEqual(project_metadata.version, "0.1.1")
-        self.assertEqual(project_metadata.build_version, "2")
+        self.assertEqual(project_metadata.version, "0.1.2")
+        self.assertEqual(project_metadata.build_version, "3")
         self.assertEqual(project_metadata.bundle_identifier, "dev.moos.shell")
         self.assertEqual(project_metadata.min_os_version, "17.0")
-        metadata.validate_project_tag(PROJECT, "ios-v0.1.1")
+        metadata.validate_project_tag(PROJECT, "ios-v0.1.2")
 
         with self.assertRaises(metadata.MetadataError):
-            metadata.validate_project_tag(PROJECT, "ios-v0.1.0")
+            metadata.validate_project_tag(PROJECT, "ios-v0.1.1")
 
     def test_invalid_or_inconsistent_build_number_is_rejected(self) -> None:
         original = PROJECT.read_text(encoding="utf-8")
@@ -80,7 +80,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             with self.subTest(replacement=replacement), tempfile.TemporaryDirectory() as directory:
                 project = Path(directory) / "project.pbxproj"
                 project.write_text(
-                    original.replace("CURRENT_PROJECT_VERSION = 2;", f"CURRENT_PROJECT_VERSION = {replacement};"),
+                    original.replace("CURRENT_PROJECT_VERSION = 3;", f"CURRENT_PROJECT_VERSION = {replacement};"),
                     encoding="utf-8",
                 )
                 with self.assertRaises(metadata.MetadataError):
@@ -90,8 +90,8 @@ class ReleaseMetadataTests(unittest.TestCase):
             project = Path(directory) / "project.pbxproj"
             project.write_text(
                 original.replace(
-                    "CURRENT_PROJECT_VERSION = 2;",
                     "CURRENT_PROJECT_VERSION = 3;",
+                    "CURRENT_PROJECT_VERSION = 4;",
                     1,
                 ),
                 encoding="utf-8",
