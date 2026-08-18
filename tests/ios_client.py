@@ -56,8 +56,13 @@ def main() -> None:
         "ConnectionBannerView.swift",
         "LocalShellPreferences.swift",
         "RemoteMetadataCache.swift",
+        "HostConfigurationStore.swift",
+        "DeviceCredentialStore.swift",
         "LiveMOOSStateProviding.swift",
+        "LiveMOOSStateService.swift",
         "MOOSProtocolV1.swift",
+        "MOOSGatewayV1.swift",
+        "NWMOOSTransport.swift",
     }
     assert component_sources <= {source.name for source in swift_sources}
 
@@ -68,7 +73,6 @@ def main() -> None:
         "/var/lib/moos",
         "console.sock",
         "urlsession",
-        "nwconnection",
     )
     combined_sources = "\n".join(source.read_text().lower() for source in swift_sources)
     for detail in forbidden_client_details:
@@ -83,6 +87,28 @@ def main() -> None:
     assert "options: .atomic" in combined_sources
     assert "cached desktop remains available" in combined_sources
     assert "static let version = 1" in combined_sources
+    assert "import network" in combined_sources
+    assert "maximumframebytes = 16 * 1024" in combined_sources
+    assert "userdefaultshostconfigurationstore" in combined_sources
+    assert "keychaindevicecredentialstore" in combined_sources
+    assert "ksecattraccessiblewhenunlockedthisdeviceonly" in combined_sources
+    assert "hmac<sha256>" in combined_sources
+    assert "ipv4address" in combined_sources
+    assert "ipv6address" in combined_sources
+    assert "100.64.0.0/10" in (REPO_ROOT / "GATEWAY.md").read_text()
+
+    production_app = (IOS_ROOT / "MOOSApp" / "App" / "MOOSApp.swift").read_text()
+    production_service = (
+        IOS_ROOT / "MOOSApp" / "Services" / "LiveMOOSStateService.swift"
+    ).read_text()
+    home_view = (
+        IOS_ROOT / "MOOSApp" / "Views" / "Home" / "MOOSHomeView.swift"
+    ).read_text()
+    assert "MockMOOSStateService" not in production_app
+    assert "MockMOOSStateService" not in production_service
+    assert "pairingcode" not in production_app.lower()
+    for fake_value in ("Luna", "Sol", "34%", "1.2 GB", "18_000"):
+        assert fake_value not in production_app + production_service + home_view
 
     assert not list(IOS_ROOT.rglob("Package.resolved")), "unexpected dependency lockfile"
 

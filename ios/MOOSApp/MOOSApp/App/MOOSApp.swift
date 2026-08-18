@@ -2,23 +2,29 @@ import SwiftUI
 
 @main
 struct MOOSApp: App {
-    private let preferencesStore: UserDefaultsLocalPreferencesStore
-    private let initialPreferences: LocalShellPreferences
+    private let service: LiveMOOSStateService
+    private let initialSnapshot: HomeSnapshot
 
     init() {
-        let store = UserDefaultsLocalPreferencesStore()
-        preferencesStore = store
-        initialPreferences = (try? store.load()) ?? .defaultValue
+        let store = UserDefaultsHostConfigurationStore()
+        service = LiveMOOSStateService(
+            store: store,
+            credentialStore: KeychainDeviceCredentialStore(),
+            connector: NWMOOSConnectionConnector()
+        )
+        if let configuration = try? store.load() {
+            initialSnapshot = .connecting(to: configuration)
+        } else {
+            initialSnapshot = .noHost
+        }
     }
 
     var body: some Scene {
         WindowGroup {
             MOOSHomeView(
                 viewModel: HomeViewModel(
-                    service: MockMOOSStateService(preferences: initialPreferences)
-                ),
-                settingsViewModel: SettingsViewModel(
-                    store: preferencesStore
+                    service: service,
+                    initialSnapshot: initialSnapshot
                 )
             )
         }

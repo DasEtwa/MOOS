@@ -2,24 +2,34 @@
 
 `MOOSApp` is an experimental native SwiftUI client. It renders the shell on the
 iPhone and consumes only client-facing concepts such as a Host, Personal MOOS,
-connection state, apps, widgets, and sessions.
+and connection state.
 
-The project intentionally has no live transport, authentication, pairing,
-Tailscale integration, remote application streaming, or host-runtime knowledge.
-Its initial data comes from `MockMOOSStateService` through a service protocol so
-the presentation can stay intact when an authenticated Protocol v1 client is
-added after M7/M8.
+The production app starts with no configured Host. Add Host accepts only a
+literal Tailscale IPv4 or IPv6 address and persists that address, port, and
+non-secret device ID in `UserDefaults`; the paired device key
+is stored separately in the iOS Keychain. The app opens one Network.framework
+TCP connection, completes the MOOS Gateway v1 HMAC challenge, and then sends the
+bounded Protocol v1 `status` request. Both client and Gateway prove possession
+of the paired key over fresh nonces. The UI becomes Connected only after the
+mutual authentication and strictly validated Protocol-v1 response, then renders
+the returned Personal runtime state.
+Preview and test fixtures remain in `MockMOOSStateService`; production does not
+instantiate that service or fall back to its data.
+
+The repository's `moosd` still exposes only its local Unix socket. The separate
+`moos-gateway` binds to an explicit Tailscale address, authenticates the concrete
+MOOS device, checks its status grant, and forwards the unchanged Protocol-v1
+frame. Tailscale provides encrypted transport but membership alone is not MOOS
+application authentication.
 
 Open `MOOSApp.xcodeproj` in Xcode and run the `MOOSApp` scheme on an iPhone
 simulator. The deployment target is iOS 17.0 and the project has no third-party
 dependencies. The committed `AppIcon` asset catalog uses the same MOOS artwork
 that is published with the SideStore source.
 
-The current Home is entirely local: it renders mock Luna/Sol and resource
-widgets, an app grid, connection/time/session indicators, and the experimental
-MOOS menus. Tap the bottom-left MOOS button for non-functional system controls;
-long-press it for the replaceable radial navigation prototype. Running-app
-context actions are also placeholders and do not issue backend commands.
+With no saved Host, Home shows only the MOOS title, `No host connected.`, and
+Add Host. A saved Host moves through Connecting, Connected, and Disconnected
+states. Retry, Edit Host, and Remove Host remain available after failure.
 
 ## State lifetimes
 
@@ -32,10 +42,10 @@ context actions are also placeholders and do not issue backend commands.
   and synchronized uptime. Services publish snapshots with `AsyncStream` rather
   than requiring view polling.
 
-The connected app and the reconnecting/offline previews still use mock data.
-Offline snapshots deliberately retain cached widgets and apps. The Protocol v1
-request type is transport-independent; there is still no network transport,
-pairing, credential, or live backend client in this project.
+Legacy shell previews may still use mock widgets, apps, sessions, latency, and
+uptime, but none of those values appear in the normal app experience. QR
+pairing, biometric gating, terminal streaming, application streaming, and
+lifecycle controls remain outside this slice.
 
 ## Build verification
 
