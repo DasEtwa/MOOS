@@ -17,11 +17,13 @@ enum HomeSnapshotComposer {
 
         return HomeSnapshot(
             host: metadata.host,
-            personalSystem: PersonalSystem(
-                id: metadata.personalSystemID,
-                displayName: metadata.personalSystemName,
-                state: liveState.personalSystemState
-            ),
+            personalSystems: [
+                PersonalSystem(
+                    id: metadata.personalSystemID,
+                    displayName: metadata.personalSystemName,
+                    state: liveState.personalSystemState
+                )
+            ],
             connectionState: liveState.connectionState,
             widgets: widgets,
             applications: arrange(
@@ -32,7 +34,8 @@ enum HomeSnapshotComposer {
             latencyMilliseconds: liveState.latencyMilliseconds,
             uptime: liveState.uptime,
             lastSynchronizedAt: liveState.synchronizedAt,
-            isShowingCachedMetadata: isShowingCachedMetadata
+            isShowingCachedMetadata: isShowingCachedMetadata,
+            failureMessage: nil
         )
     }
 

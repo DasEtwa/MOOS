@@ -35,6 +35,14 @@ struct MockMOOSStateService: MOOSStateProviding {
         }
     }
 
+    func configureHost(_ configuration: HostConfiguration, deviceKey: Data?) async -> Bool {
+        true
+    }
+
+    func retry() async {}
+
+    func removeHost() async {}
+
     private var liveState: LiveMOOSState {
         let connectionState: ConnectionState
         let latency: Int?

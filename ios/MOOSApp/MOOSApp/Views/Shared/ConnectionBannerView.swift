@@ -8,7 +8,7 @@ struct ConnectionBannerView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: state == .offline ? "network.slash" : "arrow.triangle.2.circlepath")
+            Image(systemName: state.isReachable ? "network" : "network.slash")
                 .foregroundStyle(.orange)
                 .padding(.top, 2)
 
@@ -41,13 +41,15 @@ struct ConnectionBannerView: View {
 
     private var title: String {
         switch state {
+        case .noHost:
+            return "No host connected"
         case .connected:
             return "Connected"
         case .connecting:
             return "Connecting to MOOS"
         case .reconnecting:
             return "Reconnecting to MOOS"
-        case .offline:
+        case .disconnected, .offline:
             return "MOOS is offline"
         }
     }

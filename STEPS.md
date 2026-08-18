@@ -221,7 +221,16 @@ Completion criteria: one device can be authorized and revoked safely.
 
 Do not do yet: Google/Gmail login or global account infrastructure.
 
-Status: Planned
+Status: Implemented; real Host/iPhone acceptance pending
+
+Implementation: `moos-gateway-device` creates independent random device keys,
+an atomically replaced root-managed authorized-device store, status-only grants,
+individual revocation, and key rotation. Gateway v1 uses fresh server and
+client nonces with an HMAC-SHA256 challenge proof. The iOS app accepts the
+one-time manual pairing code and stores the key with ThisDeviceOnly Keychain
+protection. Automated wrong-key, nonce-binding, malformed-input, revocation,
+rotation, and permission tests pass. A real paired iPhone has not yet been
+observed from this Linux development environment.
 
 ## Slice M8 — Tailscale host transport
 
@@ -241,7 +250,17 @@ guest's network model.
 
 Do not do yet: public WAN exposure or transport-specific client logic.
 
-Status: Planned
+Status: Partial; authenticated status transport implemented, terminal pending
+
+Implementation: the separate unprivileged `moos-gateway` requires the explicit
+listen address to be assigned to `tailscale0`, refuses addresses outside
+Tailscale's IPv4 and IPv6 ranges, and is additionally restricted by systemd
+interface/IP policy. It authenticates before opening the local control channel
+and authorizes every Protocol-v1 request. `moosd` independently restricts that
+Gateway Unix peer to `status`. Automated socket tests verify valid forwarding,
+deny-before-backend, an absolute auth deadline, live revocation, generic auth
+failures, and Tailscale-interface binding. The roadmap's remote terminal
+acceptance remains deliberately unimplemented.
 
 ## Slice I1 — Native iOS project foundation
 
@@ -392,7 +411,7 @@ any version, test, iPhoneOS/arm64, unsigned-bundle, IPA, source-history, or Page
 preparation error; only the publish job can create the Release; SideStore can
 consume a stable Pages source whose versions point to immutable Release assets.
 
-Status: Implemented; real publication intentionally awaits an approved tag.
+Status: Implemented and verified with `ios-v0.1.1`.
 Implemented commits: `build(ios): centralize unsigned IPA packaging`,
 `feat(ios): add deterministic AltSource tooling`,
 `ci(ios): add guarded release publishing`,
@@ -410,26 +429,27 @@ fixture AltSource generation/validation, and `git diff --check` passed.
 `tests/managed_personal.py` was not rerun: the unprivileged development session
 has no non-interactive sudo and its root-only Personal image staging is absent;
 this distribution-only slice does not change that runtime. The complete macOS
-simulator/device workflow will be observed after these commits are pushed.
-Manual prerequisite: enable **Settings → Pages → Build and deployment → Source:
-GitHub Actions** once. The repository Pages API currently returns no configured
-site, so no public source URL is claimed before that setting and the first real
-deployment.
+simulator, unit-test, and unsigned iPhoneOS/arm64 workflow passed for the
+published `ios-v0.1.1` release.
+The one-time Pages setting **Settings → Pages → Build and deployment → Source:
+GitHub Actions** is enabled. Release `ios-v0.1.1`, its unsigned `MOOS.ipa`, and
+the stable SideStore source were published successfully.
 Security: normal CI is `contents: read`; only the tag-only Release job receives
 `contents: write`; Pages receives only its required scoped write/OIDC rights.
 There is no `pull_request_target`, PAT, Apple credential, certificate,
 provisioning profile, private key, signing step, live networking, or protocol
 change.
-Blockers: none in repository code. The first real tag/Release/Pages deployment
-was not performed because publication requires explicit approval.
+Blockers: none in repository code.
 Deviations: none.
 
-## Deferred mobile integration — after M7/M8
+## Mobile integration status
 
-- Add an authenticated Protocol v1 client only after M7 defines pairing,
-  credential storage, authorization, and revocation.
-- Add the Tailscale-carried remote transport only after M8 exposes a reviewed
-  authenticated endpoint; never proxy the current local socket directly.
+- The production iOS application uses the authenticated Gateway session, keeps
+  its device key in the Keychain, and requests real Protocol-v1 status.
+- The Gateway carries unchanged status frames over Tailscale without directly
+  publishing the local control socket.
+- Real Host/iPhone acceptance remains to be performed on Apple hardware with a
+  configured tailnet.
 - Connect a native Terminal UI to the real Personal terminal only after those
   boundaries pass real-device tests. Client disconnect must not stop Personal.
 - Review the native shell experiment before committing to radial navigation,

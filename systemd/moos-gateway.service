@@ -1,0 +1,50 @@
+[Unit]
+Description=MOOS authenticated Tailscale gateway
+Documentation=file:/usr/share/doc/moos/GATEWAY.md
+Requires=moosd.socket
+After=moosd.socket network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=moos-gateway
+Group=moos-gateway
+SupplementaryGroups=moos-control
+EnvironmentFile=/etc/moos/gateway.conf
+ExecStart=/usr/lib/moos/moos-gateway --listen-address ${MOOS_GATEWAY_LISTEN_ADDRESS} --port ${MOOS_GATEWAY_PORT}
+Restart=on-failure
+RestartSec=2s
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=moos-gateway
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectProc=invisible
+ProtectHostname=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNetworkInterfaces=tailscale0
+IPAddressDeny=any
+IPAddressAllow=100.64.0.0/10
+IPAddressAllow=fd7a:115c:a1e0::/48
+CapabilityBoundingSet=
+TasksMax=64
+MemoryMax=128M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

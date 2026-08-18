@@ -1,9 +1,10 @@
 # MOOS Protocol v1
 
 This document defines the first client-facing MOOS protocol contract. It is
-transport-neutral: the current implementation uses a local Unix stream socket,
-but a future authenticated transport may carry the same frames without
-exposing QEMU, systemd, filesystem, or process details.
+transport-neutral: `moosd` uses a local Unix stream socket, while the
+authenticated Tailscale-only MOOS Gateway defined in `GATEWAY.md` carries the
+same frames remotely without exposing QEMU, systemd, filesystem, or process
+details.
 
 ## Transport and framing
 
@@ -17,8 +18,9 @@ exposing QEMU, systemd, filesystem, or process details.
 - When a peer half-closes its write side after an incomplete frame, the Host
   returns the structured error before closing its read side. A full disconnect
   is isolated to that client because no response channel remains.
-- The current transport is local Unix `SOCK_STREAM` only. No TCP, Tailscale, or
-  public listener is part of v1.
+- `moosd` remains local Unix `SOCK_STREAM` only. The separate Gateway may
+  forward authenticated and authorized frames over its Tailscale-only TCP
+  listener. No public listener is part of v1.
 
 ## Control requests
 
@@ -96,8 +98,8 @@ Control errors have this shape:
 
 Defined control error codes are `unsupported_protocol`, `invalid_request`,
 `request_too_large`, `unknown_operation`, `already_running`, `not_running`,
-`terminal_busy`, and `runtime_error`. Clients must handle unknown future codes
-as generic errors.
+`terminal_busy`, `runtime_error`, and the Gateway-generated `forbidden`. Clients
+must handle unknown future codes as generic errors.
 
 Clients validate `protocolVersion`, the boolean `ok`, and the operation-specific
 response data before using it. Unknown response fields are ignored. A response
@@ -141,5 +143,5 @@ time by the current host runtime.
 - v1 servers reject unknown request fields rather than guessing their meaning.
 - Unknown error codes are forward-compatible generic errors.
 - Host implementation details never become protocol fields.
-- Authentication and remote transport are deliberately outside v1 and are
-  specified by later slices.
+- Authentication remains outside the Protocol-v1 control frames and is the
+  required Gateway session defined in `GATEWAY.md`.

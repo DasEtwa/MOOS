@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 import os
+import pwd
 import select
 import socket
 import stat
+import struct
 import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -40,6 +42,9 @@ from moos_runtime import (
 READ_BYTES = 4096
 TERMINAL_READ_BYTES = 2048
 LOG = logging.getLogger(__name__)
+GATEWAY_USER = "moos-gateway"
+GATEWAY_UID_PATH = Path("/etc/moos/gateway.uid")
+GATEWAY_OPERATIONS = frozenset({"status"})
 
 
 @dataclass(frozen=True)
@@ -54,9 +59,18 @@ class MoosdService:
     def __init__(self, runtime: PersonalRuntime) -> None:
         self.runtime = runtime
 
-    def dispatch(self, request: dict[str, Any]) -> DispatchResult:
+    def dispatch(
+        self,
+        request: dict[str, Any],
+        *,
+        allowed_operations: frozenset[str] | None = None,
+    ) -> DispatchResult:
         try:
             operation = parse_control_request(request).operation
+            if allowed_operations is not None and operation not in allowed_operations:
+                return DispatchResult(
+                    self._error("forbidden", "Operation is not permitted")
+                )
             if operation == "status":
                 status = self.runtime.status()
                 return DispatchResult(self._ok(operation, {"personal": asdict(status)}))
@@ -162,10 +176,40 @@ def _send(connection: ByteTransport, frame: dict[str, Any]) -> bool:
         return False
 
 
+def _peer_uid(connection: socket.socket) -> int:
+    credentials = connection.getsockopt(
+        socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")
+    )
+    _, uid, _ = struct.unpack("3i", credentials)
+    return uid
+
+
+def _gateway_uids() -> frozenset[int]:
+    uids: set[int] = set()
+    try:
+        uids.add(pwd.getpwnam(GATEWAY_USER).pw_uid)
+    except KeyError:
+        pass
+    try:
+        configured = GATEWAY_UID_PATH.read_text(encoding="ascii").strip()
+        if configured.isascii() and configured.isdigit() and int(configured) > 0:
+            uids.add(int(configured))
+    except OSError:
+        pass
+    return frozenset(uids)
+
+
 def _handle_client(connection: socket.socket, service: MoosdService) -> None:
     decoder = FrameDecoder()
     with connection:
         try:
+            peer_uid = _peer_uid(connection)
+            gateway_uids = _gateway_uids()
+            allowed_operations = (
+                GATEWAY_OPERATIONS
+                if peer_uid in gateway_uids
+                else None
+            )
             while True:
                 data = connection.recv(READ_BYTES)
                 if not data:
@@ -181,7 +225,10 @@ def _handle_client(connection: socket.socket, service: MoosdService) -> None:
                         continue
                     if result.frame is None:
                         continue
-                    dispatched = service.dispatch(result.frame)
+                    dispatched = service.dispatch(
+                        result.frame,
+                        allowed_operations=allowed_operations,
+                    )
                     if not _send(connection, dispatched.response):
                         if dispatched.terminal is not None:
                             dispatched.terminal.close()
