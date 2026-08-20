@@ -4,6 +4,26 @@
 iPhone and consumes only client-facing concepts such as a Host, Personal MOOS,
 and connection state.
 
+When iOS backgrounds the app, the client closes its live Gateway session and
+pauses status polling. Returning to the foreground immediately creates and
+authenticates a fresh session before the UI can report Connected again. This
+avoids presenting the stale pre-background connection after the Gateway's idle
+timeout has elapsed.
+
+Home presents the configured Host as one card with its exact endpoint, live
+connection state, and Protocol-v1 boundary. Host administration is contained
+in the card's actions menu: editing, connection details, local renaming,
+copying the endpoint, and a separately confirmed destructive removal. Real
+instances use the same card pattern; tapping an instance name edits its local
+alias inline. Host and instance aliases survive launches in `UserDefaults` and
+never alter the identity returned by `moosd`.
+
+`PersonalSystem` carries a typed capability set for future server-provided
+instance actions. Production Protocol v1 currently supplies no capabilities,
+so Home does not invent console, file, gallery, backup, or other actions. The
+instance menu exposes renaming and reports that no additional actions are
+available until the control plane genuinely advertises them.
+
 The production app starts with no configured Host. Add Host accepts only a
 literal Tailscale IPv4 or IPv6 address and persists that address, port, and
 non-secret device ID in `UserDefaults`; the paired device key

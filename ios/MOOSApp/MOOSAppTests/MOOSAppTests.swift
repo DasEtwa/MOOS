@@ -132,7 +132,8 @@ final class MOOSAppTests: XCTestCase {
         let configuration = try HostConfiguration(
             address: "100.64.0.22",
             port: 7411,
-            deviceID: Self.deviceID
+            deviceID: Self.deviceID,
+            displayName: "Garden Host"
         )
 
         try UserDefaultsHostConfigurationStore(defaults: defaults).save(configuration)
@@ -140,6 +141,52 @@ final class MOOSAppTests: XCTestCase {
         XCTAssertEqual(
             try UserDefaultsHostConfigurationStore(defaults: defaults).load(),
             configuration
+        )
+    }
+
+    func testLegacyHostConfigurationLoadsWithoutDisplayName() throws {
+        let defaults = try temporaryDefaults()
+        let legacy = Data(
+            """
+            {"address":"100.64.0.22","deviceID":"\(Self.deviceID)","port":7411}
+            """.utf8
+        )
+        defaults.set(legacy, forKey: "moos.host.configuration.v1")
+
+        let configuration = try XCTUnwrap(
+            UserDefaultsHostConfigurationStore(defaults: defaults).load()
+        )
+
+        XCTAssertNil(configuration.displayName)
+        XCTAssertEqual(configuration.host.displayName, "MOOS Host")
+    }
+
+    func testLocalDisplayNamesAreBoundedAndRejectControls() {
+        XCTAssertEqual(MOOSDisplayName.normalized("  Garden Host  "), "Garden Host")
+        XCTAssertNil(MOOSDisplayName.normalized(""))
+        XCTAssertNil(MOOSDisplayName.normalized("bad\nname"))
+        XCTAssertNil(
+            MOOSDisplayName.normalized(
+                String(repeating: "x", count: MOOSDisplayName.maximumLength + 1)
+            )
+        )
+    }
+
+    func testInstanceNamePersistsPerHostAndInstance() throws {
+        let defaults = try temporaryDefaults()
+        let store = UserDefaultsInstanceNameStore(defaults: defaults)
+
+        try store.saveName("Garden", hostID: Self.deviceID, instanceID: "personal")
+
+        XCTAssertEqual(
+            try UserDefaultsInstanceNameStore(defaults: defaults).loadName(
+                hostID: Self.deviceID,
+                instanceID: "personal"
+            ),
+            "Garden"
+        )
+        XCTAssertNil(
+            try store.loadName(hostID: "another-host", instanceID: "personal")
         )
     }
 
@@ -257,6 +304,7 @@ final class MOOSAppTests: XCTestCase {
         XCTAssertEqual(snapshot.personalSystems, [
             PersonalSystem(id: "personal", displayName: "Personal MOOS", state: .running),
         ])
+        XCTAssertTrue(snapshot.personalSystems[0].capabilities.isEmpty)
         XCTAssertTrue(snapshot.widgets.isEmpty)
         XCTAssertTrue(snapshot.applications.isEmpty)
         let sentFrames = connection.sentFrames
@@ -267,6 +315,184 @@ final class MOOSAppTests: XCTestCase {
         XCTAssertTrue(String(decoding: sentFrames[1], as: UTF8.self).contains(
             "\"operation\":\"status\""
         ))
+    }
+
+    func testPersistedInstanceNameMapsOntoRealStatus() async throws {
+        let defaults = try temporaryDefaults()
+        let configuration = try HostConfiguration(
+            address: "100.64.0.10",
+            port: 7411,
+            deviceID: Self.deviceID
+        )
+        let hostStore = UserDefaultsHostConfigurationStore(defaults: defaults)
+        try hostStore.save(configuration)
+        let nameStore = UserDefaultsInstanceNameStore(defaults: defaults)
+        try nameStore.saveName(
+            "Garden",
+            hostID: Self.deviceID,
+            instanceID: "personal"
+        )
+        let credentials = InMemoryDeviceCredentialStore()
+        try credentials.saveKey(Self.deviceKey, deviceID: Self.deviceID)
+        let service = LiveMOOSStateService(
+            store: hostStore,
+            credentialStore: credentials,
+            instanceNameStore: nameStore,
+            connector: TestConnector(result: .success(TestConnection(frames: [
+                .success(Self.gatewayChallenge),
+                .success(Self.gatewayAuthenticated),
+                .success(Self.validStatusResponse),
+            ]))),
+            pollIntervalNanoseconds: 60_000_000_000,
+            gatewayClientNonce: Data(repeating: 4, count: 32)
+        )
+
+        let snapshot = await firstSnapshot(from: service) {
+            $0.connectionState == .connected
+        }
+
+        XCTAssertEqual(snapshot.personalSystems.first?.displayName, "Garden")
+    }
+
+    func testHostAndInstanceRenameUpdateProductionSnapshot() async throws {
+        let defaults = try temporaryDefaults()
+        let configuration = try HostConfiguration(
+            address: "100.64.0.10",
+            port: 7411,
+            deviceID: Self.deviceID
+        )
+        let hostStore = UserDefaultsHostConfigurationStore(defaults: defaults)
+        try hostStore.save(configuration)
+        let nameStore = UserDefaultsInstanceNameStore(defaults: defaults)
+        let credentials = InMemoryDeviceCredentialStore()
+        try credentials.saveKey(Self.deviceKey, deviceID: Self.deviceID)
+        let service = LiveMOOSStateService(
+            store: hostStore,
+            credentialStore: credentials,
+            instanceNameStore: nameStore,
+            connector: TestConnector(result: .success(TestConnection(frames: [
+                .success(Self.gatewayChallenge),
+                .success(Self.gatewayAuthenticated),
+                .success(Self.validStatusResponse),
+            ]))),
+            pollIntervalNanoseconds: 60_000_000_000,
+            gatewayClientNonce: Data(repeating: 4, count: 32)
+        )
+        _ = await firstSnapshot(from: service) {
+            $0.connectionState == .connected
+        }
+
+        let hostRenamed = await service.renameHost(to: "Studio")
+        let instanceRenamed = await service.renamePersonalSystem(
+            id: "personal",
+            to: "Garden"
+        )
+
+        XCTAssertTrue(hostRenamed)
+        XCTAssertTrue(instanceRenamed)
+
+        let renamed = await firstSnapshot(from: service)
+        XCTAssertEqual(renamed.host?.displayName, "Studio")
+        XCTAssertEqual(renamed.personalSystems.first?.displayName, "Garden")
+        XCTAssertEqual(try hostStore.load()?.displayName, "Studio")
+        XCTAssertEqual(
+            try nameStore.loadName(hostID: Self.deviceID, instanceID: "personal"),
+            "Garden"
+        )
+    }
+
+    func testForegroundReauthenticatesAfterBackgroundClosesSession() async throws {
+        let defaults = try temporaryDefaults()
+        let configuration = try HostConfiguration(
+            address: "100.64.0.10",
+            port: 7411,
+            deviceID: Self.deviceID
+        )
+        let store = UserDefaultsHostConfigurationStore(defaults: defaults)
+        try store.save(configuration)
+        let credentials = InMemoryDeviceCredentialStore()
+        try credentials.saveKey(Self.deviceKey, deviceID: Self.deviceID)
+        let firstConnection = TestConnection(frames: [
+            .success(Self.gatewayChallenge),
+            .success(Self.gatewayAuthenticated),
+            .success(Self.validStatusResponse),
+        ])
+        let resumedConnection = TestConnection(frames: [
+            .success(Self.gatewayChallenge),
+            .success(Self.gatewayAuthenticated),
+            .success(Self.validStatusResponse),
+        ])
+        let connector = TestConnector(results: [
+            .success(firstConnection),
+            .success(resumedConnection),
+        ])
+        let service = LiveMOOSStateService(
+            store: store,
+            credentialStore: credentials,
+            connector: connector,
+            pollIntervalNanoseconds: 60_000_000_000,
+            gatewayClientNonce: Data(repeating: 4, count: 32)
+        )
+
+        _ = await firstSnapshot(from: service) {
+            $0.connectionState == .connected
+        }
+        await service.applicationDidEnterBackground()
+
+        let backgrounded = await firstSnapshot(from: service)
+        XCTAssertEqual(backgrounded.connectionState, .reconnecting)
+        XCTAssertEqual(backgrounded.personalSystems, [
+            PersonalSystem(id: "personal", displayName: "Personal MOOS", state: .running),
+        ])
+        XCTAssertEqual(firstConnection.closeCount, 1)
+
+        await service.applicationDidBecomeActive()
+
+        let resumed = await firstSnapshot(from: service)
+        XCTAssertEqual(resumed.connectionState, .connected)
+        XCTAssertEqual(connector.connectionAttempts, 2)
+        XCTAssertEqual(resumedConnection.sentFrames.count, 2)
+    }
+
+    func testRevokedDeviceLeavesConnectedStateOnNextStatusPoll() async throws {
+        let defaults = try temporaryDefaults()
+        let configuration = try HostConfiguration(
+            address: "100.64.0.10",
+            port: 7411,
+            deviceID: Self.deviceID
+        )
+        let store = UserDefaultsHostConfigurationStore(defaults: defaults)
+        try store.save(configuration)
+        let credentials = InMemoryDeviceCredentialStore()
+        try credentials.saveKey(Self.deviceKey, deviceID: Self.deviceID)
+        let connection = TestConnection(frames: [
+            .success(Self.gatewayChallenge),
+            .success(Self.gatewayAuthenticated),
+            .success(Self.validStatusResponse),
+            .success(Self.revokedStatusResponse),
+        ])
+        let service = LiveMOOSStateService(
+            store: store,
+            credentialStore: credentials,
+            connector: TestConnector(result: .success(connection)),
+            pollIntervalNanoseconds: 1_000_000,
+            gatewayClientNonce: Data(repeating: 4, count: 32)
+        )
+
+        var observedConnected = false
+        var revokedSnapshot: HomeSnapshot?
+        for await snapshot in service.snapshots() {
+            if snapshot.connectionState == .connected {
+                observedConnected = true
+            } else if observedConnected, snapshot.connectionState == .disconnected {
+                revokedSnapshot = snapshot
+                break
+            }
+        }
+
+        XCTAssertTrue(observedConnected)
+        XCTAssertEqual(revokedSnapshot?.connectionState, .disconnected)
+        XCTAssertEqual(revokedSnapshot?.failureMessage, "Device access revoked")
     }
 
     func testGatewayPairingCodeParsesDeviceIdentityAndKey() throws {
@@ -463,6 +689,9 @@ final class MOOSAppTests: XCTestCase {
     private static let validStatusResponse = """
     {"protocolVersion":1,"ok":true,"operation":"status","data":{"personal":{"identity":"personal","state":"running","result":"success"}},"events":[]}
     """
+    private static let revokedStatusResponse = """
+    {"protocolVersion":1,"ok":false,"error":{"code":"forbidden","message":"Device access revoked"}}
+    """
 
     private static let deviceID = "00000000-0000-4000-8000-000000000001"
     private static let deviceKey = Data(repeating: 7, count: 32)
@@ -510,6 +739,7 @@ private final class TestConnection: MOOSGatewayConnection, @unchecked Sendable {
     private let lock = NSLock()
     private var frames: [Result<String, TestConnectionError>]
     private var recordedFrames: [Data] = []
+    private var closes = 0
 
     init(frames: [Result<String, TestConnectionError>]) {
         self.frames = frames
@@ -519,6 +749,12 @@ private final class TestConnection: MOOSGatewayConnection, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return recordedFrames
+    }
+
+    var closeCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return closes
     }
 
     func sendFrame(_ frame: Data) async throws {
@@ -538,16 +774,24 @@ private final class TestConnection: MOOSGatewayConnection, @unchecked Sendable {
         return data
     }
 
-    func close() async {}
+    func close() async {
+        lock.lock()
+        closes += 1
+        lock.unlock()
+    }
 }
 
 private final class TestConnector: MOOSConnectionConnecting, @unchecked Sendable {
     private let lock = NSLock()
-    private let result: Result<TestConnection, TestConnectionError>
+    private var results: [Result<TestConnection, TestConnectionError>]
     private var attempts = 0
 
     init(result: Result<TestConnection, TestConnectionError>) {
-        self.result = result
+        results = [result]
+    }
+
+    init(results: [Result<TestConnection, TestConnectionError>]) {
+        self.results = results
     }
 
     var connectionAttempts: Int {
@@ -559,6 +803,7 @@ private final class TestConnector: MOOSConnectionConnecting, @unchecked Sendable
     func connect(to host: HostConfiguration) async throws -> any MOOSGatewayConnection {
         lock.lock()
         attempts += 1
+        let result = results.isEmpty ? .failure(.unreachable) : results.removeFirst()
         lock.unlock()
         return try result.get()
     }

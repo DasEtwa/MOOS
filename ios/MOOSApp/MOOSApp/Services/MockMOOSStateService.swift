@@ -43,6 +43,14 @@ struct MockMOOSStateService: MOOSStateProviding {
 
     func removeHost() async {}
 
+    func renameHost(to displayName: String) async -> Bool { true }
+
+    func renamePersonalSystem(id: String, to displayName: String) async -> Bool { true }
+
+    func applicationDidEnterBackground() async {}
+
+    func applicationDidBecomeActive() async {}
+
     private var liveState: LiveMOOSState {
         let connectionState: ConnectionState
         let latency: Int?

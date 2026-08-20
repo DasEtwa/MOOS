@@ -27,8 +27,14 @@ struct HostConfiguration: Codable, Equatable, Sendable {
     let address: String
     let port: UInt16
     let deviceID: String
+    let displayName: String?
 
-    init(address: String, port: UInt16, deviceID: String) throws {
+    init(
+        address: String,
+        port: UInt16,
+        deviceID: String,
+        displayName: String? = nil
+    ) throws {
         let trimmedAddress = address.trimmingCharacters(in: .whitespacesAndNewlines)
         guard Self.isTailscaleAddress(trimmedAddress) else {
             throw HostConfigurationError.invalidAddress
@@ -40,9 +46,19 @@ struct HostConfiguration: Codable, Equatable, Sendable {
               identifier.uuidString.lowercased() == deviceID else {
             throw HostConfigurationError.invalidDeviceID
         }
+        let normalizedDisplayName: String?
+        if let displayName {
+            guard let normalized = MOOSDisplayName.normalized(displayName) else {
+                throw HostConfigurationError.invalidDisplayName
+            }
+            normalizedDisplayName = normalized
+        } else {
+            normalizedDisplayName = nil
+        }
         self.address = trimmedAddress
         self.port = port
         self.deviceID = deviceID
+        self.displayName = normalizedDisplayName
     }
 
     private static func isTailscaleAddress(_ value: String) -> Bool {
@@ -63,7 +79,7 @@ struct HostConfiguration: Codable, Equatable, Sendable {
     var host: Host {
         Host(
             id: "\(address):\(port)",
-            displayName: "MOOS Host",
+            displayName: displayName ?? "MOOS Host",
             address: address,
             port: port,
             deviceID: deviceID
@@ -75,4 +91,21 @@ enum HostConfigurationError: Error, Equatable {
     case invalidAddress
     case invalidPort
     case invalidDeviceID
+    case invalidDisplayName
+}
+
+enum MOOSDisplayName {
+    static let maximumLength = 64
+
+    static func normalized(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              trimmed.count <= maximumLength,
+              trimmed.unicodeScalars.allSatisfy({
+                  !CharacterSet.controlCharacters.contains($0)
+              }) else {
+            return nil
+        }
+        return trimmed
+    }
 }

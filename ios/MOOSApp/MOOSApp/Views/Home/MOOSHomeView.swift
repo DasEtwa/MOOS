@@ -1,6 +1,8 @@
 import SwiftUI
+import UIKit
 
 struct MOOSHomeView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel: HomeViewModel
     @State private var isHostEditorPresented = false
 
@@ -28,7 +30,13 @@ struct MOOSHomeView: View {
                             snapshot: viewModel.snapshot,
                             retry: { Task { await viewModel.retry() } },
                             edit: showHostEditor,
-                            remove: { Task { await viewModel.removeHost() } }
+                            remove: { Task { await viewModel.removeHost() } },
+                            renameHost: { name in
+                                await viewModel.renameHost(to: name)
+                            },
+                            renamePersonalSystem: { id, name in
+                                await viewModel.renamePersonalSystem(id: id, to: name)
+                            }
                         )
                     }
                 }
@@ -38,6 +46,18 @@ struct MOOSHomeView: View {
         .preferredColorScheme(.dark)
         .task {
             await viewModel.start()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background:
+                Task { await viewModel.applicationDidEnterBackground() }
+            case .active:
+                Task { await viewModel.applicationDidBecomeActive() }
+            case .inactive:
+                break
+            @unknown default:
+                break
+            }
         }
         .sheet(isPresented: $isHostEditorPresented) {
             AddHostView(viewModel: viewModel)
@@ -78,11 +98,18 @@ private struct ConfiguredHostView: View {
     let retry: () -> Void
     let edit: () -> Void
     let remove: () -> Void
+    let renameHost: (String) async -> Bool
+    let renamePersonalSystem: (String, String) async -> Bool
+
+    @State private var isConnectionInfoPresented = false
+    @State private var isHostRenamePresented = false
+    @State private var isRemoveConfirmationPresented = false
+    @State private var hostNameDraft = ""
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                hostHeader
+                hostCard
 
                 switch snapshot.connectionState {
                 case .connecting, .reconnecting:
@@ -100,43 +127,125 @@ private struct ConfiguredHostView: View {
                 case .noHost:
                     EmptyView()
                 }
-
-                HStack(spacing: 18) {
-                    Button("Edit Host", action: edit)
-                    Button("Remove Host", role: .destructive, action: remove)
-                }
-                .font(.subheadline.weight(.semibold))
             }
             .padding(.horizontal, 24)
             .padding(.top, 28)
             .padding(.bottom, 32)
         }
+        .sheet(isPresented: $isConnectionInfoPresented) {
+            ConnectionInfoView(snapshot: snapshot)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+        }
+        .alert("Rename Host", isPresented: $isHostRenamePresented) {
+            TextField("Host name", text: $hostNameDraft)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                guard let normalized = MOOSDisplayName.normalized(hostNameDraft) else {
+                    return
+                }
+                Task { _ = await renameHost(normalized) }
+            }
+        } message: {
+            Text("Choose a local name for this MOOS Host.")
+        }
+        .confirmationDialog(
+            "Remove this MOOS Host?",
+            isPresented: $isRemoveConfirmationPresented,
+            titleVisibility: .visible
+        ) {
+            Button("Remove Host", role: .destructive, action: remove)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The saved address and device credential will be removed from this iPhone.")
+        }
     }
 
-    private var hostHeader: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(snapshot.host?.displayName ?? "MOOS Host")
-                    .font(.title3.weight(.semibold))
-                if let address = snapshot.host?.address,
-                   let port = snapshot.host?.port {
-                    Text(verbatim: "\(address):\(port)")
-                        .font(.caption.monospaced())
-                        .foregroundStyle(MOOSTheme.secondaryText)
+    private var hostCard: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: "server.rack")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(MOOSTheme.accent)
+                    .frame(width: 44, height: 44)
+                    .background(
+                        MOOSTheme.accent.opacity(0.11),
+                        in: RoundedRectangle(cornerRadius: 13)
+                    )
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(snapshot.host?.displayName ?? "MOOS Host")
+                        .font(.title3.weight(.semibold))
+                    if let endpoint {
+                        Text(verbatim: endpoint)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(MOOSTheme.secondaryText)
+                    }
                 }
+
+                Spacer(minLength: 8)
+
+                Menu {
+                    Button("Edit Host", systemImage: "pencil", action: edit)
+                    Button("Connection Info", systemImage: "info.circle") {
+                        isConnectionInfoPresented = true
+                    }
+                    Button("Rename", systemImage: "character.cursor.ibeam") {
+                        hostNameDraft = snapshot.host?.displayName ?? "MOOS Host"
+                        isHostRenamePresented = true
+                    }
+                    Button("Copy Address", systemImage: "doc.on.doc") {
+                        if let endpoint {
+                            UIPasteboard.general.string = endpoint
+                        }
+                    }
+                    .disabled(endpoint == nil)
+                    Divider()
+                    Button("Remove Host", systemImage: "trash", role: .destructive) {
+                        isRemoveConfirmationPresented = true
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.headline)
+                        .foregroundStyle(.white.opacity(0.82))
+                        .frame(width: 38, height: 38)
+                        .background(MOOSTheme.panel, in: Circle())
+                }
+                .accessibilityLabel("Host actions")
             }
-            Spacer()
-            HStack(spacing: 7) {
-                Circle()
-                    .fill(snapshot.connectionState.isReachable ? MOOSTheme.accent : .orange)
-                    .frame(width: 8, height: 8)
-                Text(snapshot.connectionState.label)
+
+            Divider()
+                .overlay(MOOSTheme.panelBorder)
+
+            HStack {
+                Label {
+                    Text(snapshot.connectionState.label)
+                        .font(.caption.monospaced())
+                } icon: {
+                    Circle()
+                        .fill(snapshot.connectionState.isReachable ? MOOSTheme.accent : .orange)
+                        .frame(width: 8, height: 8)
+                }
+                Spacer()
+                Text("Protocol v1")
                     .font(.caption.monospaced())
+                    .foregroundStyle(MOOSTheme.secondaryText)
             }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 8)
-            .background(MOOSTheme.panel, in: Capsule())
         }
+        .padding(18)
+        .background(MOOSTheme.panel, in: RoundedRectangle(cornerRadius: 20))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(MOOSTheme.panelBorder, lineWidth: 1)
+        }
+    }
+
+    private var endpoint: String? {
+        guard let address = snapshot.host?.address,
+              let port = snapshot.host?.port else {
+            return nil
+        }
+        return "\(address):\(port)"
     }
 
     private var failureCard: some View {
@@ -166,28 +275,147 @@ private struct ConfiguredHostView: View {
                 .tracking(1.2)
                 .foregroundStyle(MOOSTheme.secondaryText)
             ForEach(snapshot.personalSystems) { system in
-                HStack(spacing: 14) {
-                    Image(systemName: "server.rack")
-                        .foregroundStyle(MOOSTheme.accent)
-                        .frame(width: 36, height: 36)
-                        .background(MOOSTheme.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(system.displayName)
-                            .font(.headline)
-                        Text(system.state.label)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(MOOSTheme.secondaryText)
-                    }
-                    Spacer()
-                }
-                .padding(16)
-                .background(MOOSTheme.panel, in: RoundedRectangle(cornerRadius: 18))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18)
-                        .stroke(MOOSTheme.panelBorder, lineWidth: 1)
+                InstanceCard(system: system) { name in
+                    await renamePersonalSystem(system.id, name)
                 }
             }
         }
+    }
+}
+
+private struct InstanceCard: View {
+    let system: PersonalSystem
+    let rename: (String) async -> Bool
+
+    @State private var name: String
+    @State private var isEditingName = false
+    @FocusState private var isNameFocused: Bool
+
+    init(system: PersonalSystem, rename: @escaping (String) async -> Bool) {
+        self.system = system
+        self.rename = rename
+        _name = State(initialValue: system.displayName)
+    }
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "cube.box")
+                .foregroundStyle(MOOSTheme.accent)
+                .frame(width: 38, height: 38)
+                .background(
+                    MOOSTheme.accent.opacity(0.1),
+                    in: RoundedRectangle(cornerRadius: 11)
+                )
+
+            VStack(alignment: .leading, spacing: 5) {
+                if isEditingName {
+                    TextField("Instance name", text: $name)
+                        .font(.headline)
+                        .textFieldStyle(.plain)
+                        .focused($isNameFocused)
+                        .submitLabel(.done)
+                        .onSubmit(commitName)
+                } else {
+                    Text(system.displayName)
+                        .font(.headline)
+                        .contentShape(Rectangle())
+                        .onTapGesture(perform: beginEditingName)
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityHint("Double tap to rename")
+                }
+
+                Text(system.state.label)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(MOOSTheme.secondaryText)
+            }
+
+            Spacer()
+
+            Menu {
+                Button("Rename", systemImage: "character.cursor.ibeam") {
+                    beginEditingName()
+                }
+                if system.capabilities.isEmpty {
+                    Divider()
+                    Text("No additional actions")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .foregroundStyle(.white.opacity(0.74))
+                    .frame(width: 36, height: 36)
+            }
+            .accessibilityLabel("Instance actions")
+        }
+        .padding(16)
+        .background(MOOSTheme.panel, in: RoundedRectangle(cornerRadius: 18))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(MOOSTheme.panelBorder, lineWidth: 1)
+        }
+        .onChange(of: system.displayName) { _, updatedName in
+            guard !isEditingName else { return }
+            name = updatedName
+        }
+        .onChange(of: isNameFocused) { _, focused in
+            if !focused, isEditingName {
+                commitName()
+            }
+        }
+    }
+
+    private func beginEditingName() {
+        name = system.displayName
+        isEditingName = true
+        isNameFocused = true
+    }
+
+    private func commitName() {
+        guard isEditingName else { return }
+        isEditingName = false
+        isNameFocused = false
+        guard let normalized = MOOSDisplayName.normalized(name) else {
+            name = system.displayName
+            return
+        }
+        name = normalized
+        Task {
+            if !await rename(normalized) {
+                name = system.displayName
+            }
+        }
+    }
+}
+
+private struct ConnectionInfoView: View {
+    let snapshot: HomeSnapshot
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                LabeledContent("Host", value: snapshot.host?.displayName ?? "MOOS Host")
+                if let address = snapshot.host?.address,
+                   let port = snapshot.host?.port {
+                    LabeledContent("Address") {
+                        Text(verbatim: "\(address):\(port)")
+                            .monospaced()
+                    }
+                }
+                LabeledContent("Status", value: snapshot.connectionState.label)
+                LabeledContent("Protocol", value: "v1")
+                LabeledContent("Transport", value: "Tailscale")
+            }
+            .scrollContentBackground(.hidden)
+            .background(MOOSTheme.background)
+            .navigationTitle("Connection Info")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
     }
 }
 

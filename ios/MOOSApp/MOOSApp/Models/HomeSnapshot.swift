@@ -33,6 +33,17 @@ struct HomeSnapshot: Equatable, Sendable {
         remote(configuration: configuration, state: .connecting)
     }
 
+    static func reconnecting(
+        to configuration: HostConfiguration,
+        personalSystems: [PersonalSystem]
+    ) -> HomeSnapshot {
+        remote(
+            configuration: configuration,
+            state: .reconnecting,
+            personalSystems: personalSystems
+        )
+    }
+
     static func connected(
         to configuration: HostConfiguration,
         personalSystems: [PersonalSystem],
@@ -56,6 +67,40 @@ struct HomeSnapshot: Equatable, Sendable {
             state: .disconnected,
             personalSystems: personalSystems,
             failureMessage: message
+        )
+    }
+
+    func replacingHost(_ host: Host) -> HomeSnapshot {
+        HomeSnapshot(
+            host: host,
+            personalSystems: personalSystems,
+            connectionState: connectionState,
+            widgets: widgets,
+            applications: applications,
+            sessions: sessions,
+            latencyMilliseconds: latencyMilliseconds,
+            uptime: uptime,
+            lastSynchronizedAt: lastSynchronizedAt,
+            isShowingCachedMetadata: isShowingCachedMetadata,
+            failureMessage: failureMessage
+        )
+    }
+
+    func replacingPersonalSystem(_ replacement: PersonalSystem) -> HomeSnapshot {
+        HomeSnapshot(
+            host: host,
+            personalSystems: personalSystems.map {
+                $0.id == replacement.id ? replacement : $0
+            },
+            connectionState: connectionState,
+            widgets: widgets,
+            applications: applications,
+            sessions: sessions,
+            latencyMilliseconds: latencyMilliseconds,
+            uptime: uptime,
+            lastSynchronizedAt: lastSynchronizedAt,
+            isShowingCachedMetadata: isShowingCachedMetadata,
+            failureMessage: failureMessage
         )
     }
 

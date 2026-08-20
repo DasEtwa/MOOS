@@ -3,6 +3,7 @@ import Foundation
 actor LiveMOOSStateService: MOOSStateProviding {
     private let store: any HostConfigurationStoring
     private let credentialStore: any DeviceCredentialStoring
+    private let instanceNameStore: any InstanceNameStoring
     private let connector: any MOOSConnectionConnecting
     private let pollIntervalNanoseconds: UInt64
     private let gatewayClientNonce: Data?
@@ -12,16 +13,19 @@ actor LiveMOOSStateService: MOOSStateProviding {
     private var monitorTask: Task<Void, Never>?
     private var generation = 0
     private var hasStarted = false
+    private var isApplicationActive = true
 
     init(
         store: any HostConfigurationStoring,
         credentialStore: any DeviceCredentialStoring,
+        instanceNameStore: any InstanceNameStoring = UserDefaultsInstanceNameStore(),
         connector: any MOOSConnectionConnecting,
         pollIntervalNanoseconds: UInt64 = 5_000_000_000,
         gatewayClientNonce: Data? = nil
     ) {
         self.store = store
         self.credentialStore = credentialStore
+        self.instanceNameStore = instanceNameStore
         self.connector = connector
         self.pollIntervalNanoseconds = pollIntervalNanoseconds
         self.gatewayClientNonce = gatewayClientNonce
@@ -135,11 +139,93 @@ actor LiveMOOSStateService: MOOSStateProviding {
         emit()
     }
 
+    func renameHost(to displayName: String) async -> Bool {
+        guard let normalized = MOOSDisplayName.normalized(displayName),
+              let configuration = configuration(from: snapshot.host) else {
+            return false
+        }
+        do {
+            let renamed = try HostConfiguration(
+                address: configuration.address,
+                port: configuration.port,
+                deviceID: configuration.deviceID,
+                displayName: normalized
+            )
+            try store.save(renamed)
+            snapshot = snapshot.replacingHost(renamed.host)
+            emit()
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    func renamePersonalSystem(id: String, to displayName: String) async -> Bool {
+        guard let normalized = MOOSDisplayName.normalized(displayName),
+              let hostID = snapshot.host?.deviceID,
+              let system = snapshot.personalSystems.first(where: { $0.id == id }) else {
+            return false
+        }
+        do {
+            try instanceNameStore.saveName(
+                normalized,
+                hostID: hostID,
+                instanceID: id
+            )
+            snapshot = snapshot.replacingPersonalSystem(
+                PersonalSystem(
+                    id: system.id,
+                    displayName: normalized,
+                    state: system.state,
+                    capabilities: system.capabilities
+                )
+            )
+            emit()
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    func applicationDidEnterBackground() async {
+        guard isApplicationActive else {
+            return
+        }
+        isApplicationActive = false
+        generation += 1
+        monitorTask?.cancel()
+        monitorTask = nil
+        let activeConnection = connection
+        connection = nil
+        if let configuration = configuration(from: snapshot.host) {
+            snapshot = .reconnecting(
+                to: configuration,
+                personalSystems: snapshot.personalSystems
+            )
+            emit()
+        }
+        if let activeConnection {
+            await activeConnection.close()
+        }
+    }
+
+    func applicationDidBecomeActive() async {
+        guard !isApplicationActive else {
+            return
+        }
+        isApplicationActive = true
+        guard let configuration = configuration(from: snapshot.host) else {
+            return
+        }
+        await beginConnection(to: configuration)
+    }
+
     private func attach(_ continuation: AsyncStream<HomeSnapshot>.Continuation) {
         self.continuation?.finish()
         self.continuation = continuation
         continuation.yield(snapshot)
-        guard !hasStarted,
+        guard isApplicationActive,
+              !hasStarted,
               let configuration = configuration(from: snapshot.host) else {
             return
         }
@@ -150,6 +236,9 @@ actor LiveMOOSStateService: MOOSStateProviding {
     }
 
     private func beginConnection(to configuration: HostConfiguration) async {
+        guard isApplicationActive else {
+            return
+        }
         hasStarted = true
         generation += 1
         let attempt = generation
@@ -189,7 +278,7 @@ actor LiveMOOSStateService: MOOSStateProviding {
             self.connection = connection
             snapshot = .connected(
                 to: configuration,
-                personalSystems: [response.personalSystem]
+                personalSystems: [displayed(response.personalSystem, for: configuration)]
             )
             emit()
             monitorTask = Task {
@@ -224,7 +313,7 @@ actor LiveMOOSStateService: MOOSStateProviding {
                 let response = try await client.status()
                 snapshot = .connected(
                     to: configuration,
-                    personalSystems: [response.personalSystem]
+                    personalSystems: [displayed(response.personalSystem, for: configuration)]
                 )
                 emit()
             } catch is CancellationError {
@@ -291,7 +380,24 @@ actor LiveMOOSStateService: MOOSStateProviding {
         return try? HostConfiguration(
             address: address,
             port: port,
-            deviceID: deviceID
+            deviceID: deviceID,
+            displayName: host?.displayName
+        )
+    }
+
+    private func displayed(
+        _ system: PersonalSystem,
+        for configuration: HostConfiguration
+    ) -> PersonalSystem {
+        let alias = try? instanceNameStore.loadName(
+            hostID: configuration.deviceID,
+            instanceID: system.id
+        )
+        return PersonalSystem(
+            id: system.id,
+            displayName: alias ?? system.displayName,
+            state: system.state,
+            capabilities: system.capabilities
         )
     }
 

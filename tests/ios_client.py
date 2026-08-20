@@ -107,6 +107,22 @@ def main() -> None:
     assert "MockMOOSStateService" not in production_app
     assert "MockMOOSStateService" not in production_service
     assert "pairingcode" not in production_app.lower()
+    assert "@Environment(\\.scenePhase)" in home_view
+    assert "case .background:" in home_view
+    assert "case .active:" in home_view
+    assert "applicationDidEnterBackground" in production_service
+    assert "applicationDidBecomeActive" in production_service
+    assert "snapshot = .reconnecting" in production_service
+    assert 'Text(verbatim: "\\(address):\\(port)")' in home_view
+    assert "ConnectionInfoView" in home_view
+    assert 'accessibilityLabel("Host actions")' in home_view
+    assert 'accessibilityLabel("Instance actions")' in home_view
+    assert "isRemoveConfirmationPresented" in home_view
+    assert "confirmationDialog" in home_view
+    assert "UIPasteboard.general.string" in home_view
+    assert "renamePersonalSystem" in production_service
+    assert "instancenamestoring" in combined_sources
+    assert "set<instancecapability>" in combined_sources
     for fake_value in ("Luna", "Sol", "34%", "1.2 GB", "18_000"):
         assert fake_value not in production_app + production_service + home_view
 

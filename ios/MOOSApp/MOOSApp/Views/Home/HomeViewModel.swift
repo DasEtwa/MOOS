@@ -54,7 +54,8 @@ final class HomeViewModel: ObservableObject {
             let configuration = try HostConfiguration(
                 address: hostAddress,
                 port: numericPort,
-                deviceID: deviceID
+                deviceID: deviceID,
+                displayName: snapshot.host?.displayName
             )
             if credential != nil {
                 pairingCode = ""
@@ -80,6 +81,22 @@ final class HomeViewModel: ObservableObject {
 
     func removeHost() async {
         await service.removeHost()
+    }
+
+    func renameHost(to displayName: String) async -> Bool {
+        await service.renameHost(to: displayName)
+    }
+
+    func renamePersonalSystem(id: String, to displayName: String) async -> Bool {
+        await service.renamePersonalSystem(id: id, to: displayName)
+    }
+
+    func applicationDidEnterBackground() async {
+        await service.applicationDidEnterBackground()
+    }
+
+    func applicationDidBecomeActive() async {
+        await service.applicationDidBecomeActive()
     }
 
     func start() async {
