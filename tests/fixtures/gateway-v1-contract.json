@@ -1,0 +1,10 @@
+{
+  "authenticationProof": "-ttSQEfgZqdUbzZOqy4Qy9UgPpRcmuRKrxNGwO5yaJs",
+  "clientNonce": "BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ",
+  "deviceId": "00000000-0000-4000-8000-000000000001",
+  "deviceKey": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+  "gatewayVersion": 1,
+  "pairingCode": "moos-pair-v1:00000000-0000-4000-8000-000000000001:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+  "serverNonce": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM",
+  "serverProof": "YmdFAeCuzj06azQhfB7sWTE2FMamgULTfFiUWZKfEY8"
+}
