@@ -199,7 +199,9 @@ the daemon. Terminal input is written only to the QEMU serial socket. There is
 no `/exec` operation, arbitrary host command, host path, QEMU argument, shared
 folder, guest agent, or QEMU monitor in this interface.
 
-`moosd.socket` is owned by `root:moos-control` with mode 0660. The service uses
+`/run/moos` is traverse-only (`root:root`, mode 0711), while `moosd.socket` is
+owned by `root:moos-control` with mode 0660. The socket mode therefore remains
+the authorization boundary even though clients can traverse its parent. The service uses
 socket activation, restart-on-failure, journald logging, read-only system
 paths, no-new-privileges, and an empty capability bounding set. It retains UID
 0 because the existing fixed runner must ask the system systemd manager to

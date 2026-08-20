@@ -6,7 +6,7 @@ ListenStream=/run/moos/moosd.sock
 SocketUser=root
 SocketGroup=moos-control
 SocketMode=0660
-DirectoryMode=0750
+DirectoryMode=0711
 RemoveOnStop=yes
 
 [Install]

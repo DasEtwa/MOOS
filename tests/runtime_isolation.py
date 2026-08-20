@@ -85,6 +85,7 @@ def main():
     require("control group: moos-control", control, "dedicated client group")
     require("daemon identity: root:moos-control", control, "daemon identity")
     require("mode 0660", control, "bounded socket access")
+    require("/run/moos (root:root, mode 0711)", control, "traversable socket directory")
     require("restart on failure, journald logging", control, "operating model")
     require("sudo policy: none", control, "sudo boundary")
     require("host mutation: none (dry-run)", control, "control setup dry-run")
@@ -111,6 +112,7 @@ def main():
     require("ProtectSystem=strict", service_unit, "read-only system tree")
     require("ListenStream=/run/moos/moosd.sock", socket_unit, "local-only socket")
     require("SocketGroup=moos-control", socket_unit, "client authorization group")
+    require("DirectoryMode=0711", socket_unit, "socket directory traversal policy")
 
     gateway_unit = (REPO_ROOT / "systemd/moos-gateway.service").read_text()
     gateway_runner = (REPO_ROOT / "scripts/moos-gateway.py").read_text()

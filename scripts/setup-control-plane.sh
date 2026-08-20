@@ -75,6 +75,7 @@ done
 if [ "$DRY_RUN" -eq 1 ]; then
     printf 'control group: %s (no automatic members)\n' "$CONTROL_GROUP"
     printf 'daemon identity: root:%s (fixed typed operations only)\n' "$CONTROL_GROUP"
+    printf 'socket directory: /run/moos (root:root, mode 0711)\n'
     printf 'socket: /run/moos/moosd.sock (root:%s, mode 0660)\n' "$CONTROL_GROUP"
     printf 'runtime: systemd socket activation, restart on failure, journald logging\n'
     printf 'installed code: %s (root-owned, read-only)\n' "$LIBEXEC_ROOT"
@@ -104,6 +105,7 @@ if ! getent group "$CONTROL_GROUP" >/dev/null 2>&1; then
 fi
 
 install -d -o root -g root -m 0755 "$LIBEXEC_ROOT" "$DOC_ROOT"
+install -d -o root -g root -m 0711 /run/moos
 install -o root -g root -m 0644 \
     "$SOURCE_ROOT/host/moos_protocol.py" \
     "$SOURCE_ROOT/host/moos_runtime.py" \
@@ -122,7 +124,9 @@ install -o root -g root -m 0644 \
     "$SOURCE_ROOT/HOST_GUEST_ISOLATION.md" "$DOC_ROOT/HOST_GUEST_ISOLATION.md"
 
 systemctl daemon-reload
-systemctl enable --now moosd.socket
+systemctl enable moosd.socket
+systemctl stop moosd.service
+systemctl restart moosd.socket
 
 echo 'MOOS control plane installed'
 echo "  socket group: $CONTROL_GROUP"
