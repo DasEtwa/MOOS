@@ -1,255 +1,152 @@
 #!/usr/bin/env python3
-"""Exercise authenticated Gateway forwarding and authorization boundaries."""
+"""Validate Rust Gateway artifacts and least-privilege integration boundaries."""
 
-import socket
+import shutil
+import stat
+import subprocess
 import sys
 import tempfile
-import threading
-import time
-from collections import deque
 from pathlib import Path
 
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "host"))
-
-from moos_gateway import (  # noqa: E402
-    AdmissionLimiter,
-    GatewaySession,
-    validate_process_groups,
-    validate_tailscale_address,
-    validate_tailscale_interface_address,
-)
-from moos_gateway_auth import (  # noqa: E402
-    DeviceAdminStore,
-    encode_base64url,
-    make_authenticate_frame,
-    make_server_authentication_proof,
-    parse_challenge,
-)
-from moos_protocol import FrameDecoder, encode_frame, make_control_success  # noqa: E402
+GATEWAY = REPO_ROOT / "target" / "release" / "moos-gateway"
+DEVICE_ADMIN = REPO_ROOT / "target" / "release" / "moos-gateway-device"
+SETUP = REPO_ROOT / "scripts" / "setup-gateway.sh"
 
 
-def receive_frame(connection):
-    decoder = FrameDecoder()
-    pending = deque()
-    while True:
-        while pending:
-            result = pending.popleft()
-            assert result.error is None
-            assert result.frame is not None
-            return result.frame
-        data = connection.recv(4096)
-        assert data
-        pending.extend(decoder.feed(data))
-
-
-def start_session(store, backend_connector, *, auth_timeout=10.0):
-    client, gateway = socket.socketpair()
-    thread = threading.Thread(
-        target=GatewaySession(
-            store, backend_connector, auth_timeout=auth_timeout
-        ).handle,
-        args=(gateway,),
-        daemon=True,
+def run(command, *arguments, expected=0):
+    result = subprocess.run(
+        [str(command), *arguments],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
     )
-    thread.start()
-    return client, thread
-
-
-def authenticate(connection, device, key=None):
-    challenge = receive_frame(connection)
-    nonce = parse_challenge(challenge)
-    client_nonce = bytes(range(32))
-    connection.sendall(
-        encode_frame(
-            make_authenticate_frame(
-                device.device_id,
-                device.key if key is None else key,
-                nonce,
-                client_nonce=client_nonce,
-            )
+    if result.returncode != expected:
+        raise AssertionError(
+            f"{Path(command).name} returned {result.returncode}, expected {expected}: "
+            f"{result.stdout}{result.stderr}"
         )
-    )
-    return receive_frame(connection), nonce, client_nonce
+    return result.stdout + result.stderr
+
+
+def require(needle, value, description):
+    if needle not in value:
+        raise AssertionError(f"missing {description}: {needle!r}")
 
 
 def main():
-    validate_process_groups(
-        primary_gid=100,
-        control_gid=200,
-        supplementary_gids={200},
+    for binary in (GATEWAY, DEVICE_ADMIN):
+        if binary.read_bytes()[:4] != b"\x7fELF":
+            raise AssertionError(f"release output is not a Linux ELF binary: {binary}")
+        metadata = binary.stat()
+        if stat.S_IMODE(metadata.st_mode) != 0o755 or metadata.st_nlink != 1:
+            raise AssertionError(f"release artifact mode/link policy failed: {binary}")
+
+    gateway_version = run(GATEWAY, "--version").strip()
+    device_version = run(DEVICE_ADMIN, "--version").strip()
+    require("moos-gateway ", gateway_version, "Gateway version identity")
+    version = gateway_version.removeprefix("moos-gateway ")
+    if device_version != f"moos-gateway-device {version}":
+        raise AssertionError("release binary versions do not match")
+
+    for address in ("100.64.0.0", "100.127.255.255", "fd7a:115c:a1e0::1"):
+        run(
+            GATEWAY,
+            "validate-address",
+            "--listen-address",
+            address,
+            "--port",
+            "7411",
+        )
+    for address in ("0.0.0.0", "127.0.0.1", "192.168.1.4", "tailscale0"):
+        run(
+            GATEWAY,
+            "validate-address",
+            "--listen-address",
+            address,
+            "--port",
+            "7411",
+            expected=2,
+        )
+
+    dry_run = run(
+        SETUP,
+        "--tailscale-address",
+        "100.64.0.1",
+        "--port",
+        "7411",
+        "--dry-run",
     )
-    try:
-        validate_process_groups(
-            primary_gid=100,
-            control_gid=200,
-            supplementary_gids={200, 999},
-        )
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("accepted an unexpected gateway supplementary group")
-
-    clock = [0.0]
-    limiter = AdmissionLimiter(clock=lambda: clock[0])
-    for _ in range(4):
-        assert limiter.admit("100.64.0.2")
-    assert not limiter.admit("100.64.0.2")
-    for _ in range(4):
-        limiter.release("100.64.0.2")
-    rate_limiter = AdmissionLimiter(clock=lambda: clock[0])
-    for _ in range(20):
-        assert rate_limiter.admit("100.64.0.3")
-        rate_limiter.release("100.64.0.3")
-    assert not rate_limiter.admit("100.64.0.3")
-    clock[0] = 61.0
-    assert rate_limiter.admit("100.64.0.3")
-
-    assert validate_tailscale_address("100.64.0.1") == "100.64.0.1"
-    assert validate_tailscale_address("100.127.255.254") == "100.127.255.254"
-    assert validate_tailscale_address("fd7a:115c:a1e0::1") == "fd7a:115c:a1e0::1"
-    assert validate_tailscale_interface_address(
-        "100.64.0.1", assigned_addresses={"100.64.0.1"}
-    ) == "100.64.0.1"
-    try:
-        validate_tailscale_interface_address(
-            "100.64.0.1", assigned_addresses={"100.64.0.2"}
-        )
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("accepted a Tailscale address not assigned to tailscale0")
-    for invalid in ("0.0.0.0", "127.0.0.1", "192.168.1.4", "tailscale0"):
-        try:
-            validate_tailscale_address(invalid)
-        except ValueError:
-            pass
-        else:
-            raise AssertionError(f"accepted non-Tailscale listener: {invalid}")
+    require("Tailscale-only", dry_run, "Tailscale-only install plan")
+    require("remote grants: status only", dry_run, "status-only authorization")
+    require(f"Rust release {version}", dry_run, "versioned Rust runtime plan")
+    require("host mutation: none", dry_run, "non-mutating dry run")
 
     with tempfile.TemporaryDirectory() as temporary:
-        store = DeviceAdminStore(Path(temporary) / "devices.json")
-        device = store.add("Test iPhone", frozenset({"status"}))
-        backend_requests = []
-
-        def backend_connector():
-            gateway_side, daemon_side = socket.socketpair()
-
-            def daemon():
-                request = receive_frame(daemon_side)
-                backend_requests.append(request)
-                daemon_side.sendall(
-                    encode_frame(
-                        make_control_success(
-                            "status",
-                            {
-                                "personal": {
-                                    "identity": "personal",
-                                    "state": "running",
-                                    "result": "success",
-                                }
-                            },
-                        )
-                    )
-                )
-                daemon_side.close()
-
-            threading.Thread(target=daemon, daemon=True).start()
-            return gateway_side
-
-        connection, thread = start_session(store, backend_connector)
-        with connection:
-            authenticated, server_nonce, client_nonce = authenticate(connection, device)
-            assert authenticated == {
-                "gatewayVersion": 1,
-                "type": "authenticated",
-                "deviceId": device.device_id,
-                "permissions": ["status"],
-                "serverProof": encode_base64url(
-                    make_server_authentication_proof(
-                        device.key,
-                        server_nonce,
-                        client_nonce,
-                        device.device_id,
-                    )
-                ),
-            }
-
-            connection.sendall(
-                encode_frame({"protocolVersion": 1, "operation": "personal.stop"})
-            )
-            denied = receive_frame(connection)
-            assert denied["ok"] is False
-            assert denied["error"]["code"] == "forbidden"
-            assert backend_requests == []
-
-            connection.sendall(
-                encode_frame({"protocolVersion": 1, "operation": "status"})
-            )
-            response = receive_frame(connection)
-            assert response["ok"] is True
-            assert response["operation"] == "status"
-            assert response["data"]["personal"]["state"] == "running"
-            assert backend_requests == [
-                {"protocolVersion": 1, "operation": "status"}
-            ]
-        thread.join(timeout=2)
-
-        no_backend = lambda: (_ for _ in ()).throw(AssertionError("backend used"))
-        revoked_connection, revoked_thread = start_session(store, no_backend)
-        with revoked_connection:
-            authenticated, _, _ = authenticate(
-                revoked_connection, store.load()[device.device_id]
-            )
-            assert authenticated["type"] == "authenticated"
-            store.revoke(device.device_id)
-            revoked_connection.sendall(
-                encode_frame({"protocolVersion": 1, "operation": "status"})
-            )
-            revoked = receive_frame(revoked_connection)
-            assert revoked["error"]["code"] == "forbidden"
-        revoked_thread.join(timeout=2)
-
-        bad_connection, bad_thread = start_session(store, no_backend)
-        with bad_connection:
-            failed, _, _ = authenticate(
-                bad_connection,
-                store.load()[device.device_id],
-                key=bytes(32),
-            )
-            assert failed == {
-                "gatewayVersion": 1,
-                "type": "error",
-                "code": "authentication_failed",
-                "message": "Device authentication failed",
-            }
-        bad_thread.join(timeout=2)
-
-        slow_connection, slow_thread = start_session(
-            store, no_backend, auth_timeout=0.08
+        binary_root = Path(temporary)
+        shutil.copy2("/bin/true", binary_root / "moos-gateway")
+        shutil.copy2("/bin/true", binary_root / "moos-gateway-device")
+        for binary in binary_root.iterdir():
+            binary.chmod(0o755)
+        run(
+            SETUP,
+            "--tailscale-address",
+            "100.64.0.1",
+            "--binary-dir",
+            str(binary_root),
+            "--dry-run",
+            expected=1,
         )
-        with slow_connection:
-            receive_frame(slow_connection)
-            started = time.monotonic()
-            for byte in (b"{", b'"', b"x", b'"'):
-                try:
-                    slow_connection.sendall(byte)
-                except OSError:
-                    break
-                time.sleep(0.04)
-            slow_connection.settimeout(1)
-            failed = receive_frame(slow_connection)
-            assert failed["code"] == "authentication_failed"
-            assert time.monotonic() - started < 0.20
-        slow_thread.join(timeout=2)
 
-    print("MOOS Gateway protocol test: PASS")
-    print("  listener requires an address assigned to tailscale0: ok")
-    print("  authenticated status reaches the local Protocol-v1 backend: ok")
-    print("  unauthorized operations never reach moosd: ok")
-    print("  live revocation and generic failed authentication: ok")
-    print("  authentication has one absolute deadline: ok")
-    print("  mutual server proof, source admission, and group boundary: ok")
+    service = (REPO_ROOT / "systemd" / "moos-gateway.service").read_text(
+        encoding="utf-8"
+    )
+    for policy in (
+        "User=moos-gateway",
+        "SupplementaryGroups=moos-control",
+        "ExecStart=/usr/lib/moos/moos-gateway",
+        "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6",
+        "RestrictNetworkInterfaces=tailscale0",
+        "IPAddressDeny=any",
+        "IPAddressAllow=100.64.0.0/10",
+        "IPAddressAllow=fd7a:115c:a1e0::/48",
+        "CapabilityBoundingSet=",
+        "NoNewPrivileges=yes",
+    ):
+        require(policy, service, "systemd Gateway boundary")
+
+    platform = (
+        REPO_ROOT / "host" / "moos-gateway" / "src" / "platform_linux.rs"
+    ).read_text(encoding="utf-8")
+    require("BindToDevice", platform, "tailscale0 socket binding")
+    if "getifaddrs" in platform or "AF_NETLINK" in platform:
+        raise AssertionError("Gateway interface validation requires forbidden Netlink")
+
+    setup = SETUP.read_text(encoding="utf-8")
+    if "cargo build" in setup or "python3" in setup:
+        raise AssertionError("root installer builds code or retains a Python runtime path")
+    require(
+        "existing gateway device store has unsafe ownership or mode",
+        setup,
+        "strict existing-store validation",
+    )
+    if 'chown root:"$GATEWAY_GROUP" "$STATE_ROOT/devices.json"' in setup:
+        raise AssertionError("installer silently repairs an existing secret store")
+    for retired in (
+        REPO_ROOT / "host" / "moos_gateway.py",
+        REPO_ROOT / "host" / "moos_gateway_auth.py",
+        REPO_ROOT / "scripts" / "moos-gateway.py",
+        REPO_ROOT / "scripts" / "moos-gateway-device.py",
+    ):
+        if retired.exists():
+            raise AssertionError(f"retired Python Gateway path still exists: {retired}")
+
+    print("MOOS Rust Gateway integration test: PASS")
+    print("  matching release artifacts and strict installer validation: ok")
+    print("  Tailscale-only systemd sandbox and socket binding: ok")
+    print("  installer consumes prebuilt binaries and has rollback path: ok")
     return 0
 
 
@@ -257,6 +154,6 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except (AssertionError, OSError, ValueError) as error:
-        print("MOOS Gateway protocol test: FAIL", file=sys.stderr)
+        print("MOOS Rust Gateway integration test: FAIL", file=sys.stderr)
         print(f"  {error}", file=sys.stderr)
         sys.exit(1)

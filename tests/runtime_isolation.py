@@ -12,7 +12,6 @@ SETUP = REPO_ROOT / "scripts" / "setup-runtime-user.sh"
 STAGE = REPO_ROOT / "scripts" / "stage-instance.sh"
 RUN_INSTANCE = REPO_ROOT / "scripts" / "run-instance.sh"
 SETUP_CONTROL = REPO_ROOT / "scripts" / "setup-control-plane.sh"
-SETUP_GATEWAY = REPO_ROOT / "scripts" / "setup-gateway.sh"
 
 
 def run(script, *arguments, expected=0):
@@ -90,20 +89,6 @@ def main():
     require("sudo policy: none", control, "sudo boundary")
     require("host mutation: none (dry-run)", control, "control setup dry-run")
 
-    gateway = run(
-        SETUP_GATEWAY,
-        "--tailscale-address",
-        "100.64.0.1",
-        "--port",
-        "7411",
-        "--dry-run",
-    )
-    require("gateway identity: moos-gateway:moos-gateway", gateway, "gateway identity")
-    require("listen: 100.64.0.1:7411 (Tailscale-only)", gateway, "safe listener")
-    require("root:moos-gateway, mode 0640", gateway, "device store ownership")
-    require("remote grants: status only", gateway, "remote authorization")
-    require("host mutation: none (dry-run)", gateway, "gateway dry-run")
-
     service_unit = (REPO_ROOT / "systemd/moosd.service").read_text()
     socket_unit = (REPO_ROOT / "systemd/moosd.socket").read_text()
     require("User=root", service_unit, "required systemd broker identity")
@@ -115,7 +100,6 @@ def main():
     require("DirectoryMode=0711", socket_unit, "socket directory traversal policy")
 
     gateway_unit = (REPO_ROOT / "systemd/moos-gateway.service").read_text()
-    gateway_runner = (REPO_ROOT / "scripts/moos-gateway.py").read_text()
     require("User=moos-gateway", gateway_unit, "unprivileged gateway user")
     require("SupplementaryGroups=moos-control", gateway_unit, "local API access")
     require("RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6", gateway_unit, "network allowlist")
@@ -124,7 +108,11 @@ def main():
     require("IPAddressAllow=100.64.0.0/10", gateway_unit, "Tailscale IPv4 allowlist")
     require("CapabilityBoundingSet=", gateway_unit, "empty gateway capabilities")
     require("CPUQuota=50%", gateway_unit, "gateway CPU limit")
-    require("validate_process_groups()", gateway_runner, "runtime group validation")
+    require(
+        "ExecStart=/usr/lib/moos/moos-gateway",
+        gateway_unit,
+        "stable Rust Gateway executable",
+    )
 
     managed_io = run(
         RUN_INSTANCE,
@@ -146,23 +134,6 @@ def main():
     run(RUN_INSTANCE, "--id", "luna", "--memory", "2049M", "--dry-run", expected=2)
     run(RUN_INSTANCE, "--id", "luna", "--cpus", "3", "--dry-run", expected=2)
     run(RUN_INSTANCE, "--id", "luna", "--io-read", "unlimited", "--dry-run", expected=2)
-    run(
-        SETUP_GATEWAY,
-        "--tailscale-address",
-        "0.0.0.0",
-        "--dry-run",
-        expected=2,
-    )
-    run(
-        SETUP_GATEWAY,
-        "--tailscale-address",
-        "100.64.0.1",
-        "--port",
-        "0",
-        "--dry-run",
-        expected=2,
-    )
-
     print("MOOS Phase 3.1 policy test: PASS")
     print("  dedicated nologin runtime account plan: ok")
     print("  private Instance staging plan: ok")

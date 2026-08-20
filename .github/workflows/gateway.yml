@@ -5,31 +5,51 @@ on:
     branches:
       - "**"
     paths:
-      - "host/moos_gateway*.py"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "host/moos-gateway/**"
       - "host/moosd.py"
       - "host/moos_protocol.py"
-      - "scripts/moos-gateway*.py"
+      - "scripts/build-gateway.sh"
+      - "scripts/setup-control-plane.sh"
       - "scripts/setup-gateway.sh"
       - "systemd/moos-gateway.service"
+      - "systemd/moosd.service"
+      - "systemd/moosd.socket"
       - "tests/gateway_*.py"
+      - "tests/fixtures/gateway-v1-contract.json"
+      - "tests/protocol_contract.py"
       - "tests/moosd_protocol.py"
       - "tests/runtime_isolation.py"
       - "GATEWAY.md"
       - "PROTOCOL.md"
+      - "ios/MOOSApp/MOOSApp/Protocol/MOOSGatewayV1.swift"
+      - "ios/MOOSApp/MOOSAppTests/MOOSAppTests.swift"
       - ".github/workflows/gateway.yml"
   pull_request:
     paths:
-      - "host/moos_gateway*.py"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "host/moos-gateway/**"
       - "host/moosd.py"
       - "host/moos_protocol.py"
-      - "scripts/moos-gateway*.py"
+      - "scripts/build-gateway.sh"
+      - "scripts/setup-control-plane.sh"
       - "scripts/setup-gateway.sh"
       - "systemd/moos-gateway.service"
+      - "systemd/moosd.service"
+      - "systemd/moosd.socket"
       - "tests/gateway_*.py"
+      - "tests/fixtures/gateway-v1-contract.json"
+      - "tests/protocol_contract.py"
       - "tests/moosd_protocol.py"
       - "tests/runtime_isolation.py"
       - "GATEWAY.md"
       - "PROTOCOL.md"
+      - "ios/MOOSApp/MOOSApp/Protocol/MOOSGatewayV1.swift"
+      - "ios/MOOSApp/MOOSAppTests/MOOSAppTests.swift"
       - ".github/workflows/gateway.yml"
   workflow_dispatch:
 
@@ -39,7 +59,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
@@ -47,16 +67,36 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Compile Python and validate shell
+      - name: Install the pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.97.1 \
+            --profile minimal \
+            --component clippy \
+            --component rustfmt
+          rustup default 1.97.1
+          rustc --version --verbose
+          cargo --version
+
+      - name: Format, lint, and test the Rust Gateway
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+          cargo test --workspace --all-targets --locked
+
+      - name: Build the canonical release binaries
+        run: ./scripts/build-gateway.sh
+
+      - name: Compile Python development tools and validate shell
         run: |
           python3 -m py_compile \
-            host/moos_gateway.py \
-            host/moos_gateway_auth.py \
-            scripts/moos-gateway.py \
-            scripts/moos-gateway-device.py
-          sh -n scripts/setup-gateway.sh
+            tests/gateway_auth.py \
+            tests/gateway_protocol.py \
+            tests/protocol_contract.py \
+            tests/moosd_protocol.py \
+            tests/runtime_isolation.py
+          sh -n scripts/build-gateway.sh scripts/setup-gateway.sh
 
-      - name: Test device authentication and Gateway forwarding
+      - name: Test cross-client authentication and host integration
         run: |
           python3 tests/gateway_auth.py
           python3 tests/gateway_protocol.py
