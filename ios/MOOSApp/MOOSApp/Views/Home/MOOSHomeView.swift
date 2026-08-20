@@ -379,7 +379,7 @@ private struct InstanceCard: View {
         }
         name = normalized
         Task {
-            if !await rename(normalized) {
+            if !(await rename(normalized)) {
                 name = system.displayName
             }
         }
