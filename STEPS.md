@@ -221,16 +221,20 @@ Completion criteria: one device can be authorized and revoked safely.
 
 Do not do yet: Google/Gmail login or global account infrastructure.
 
-Status: Implemented; real Host/iPhone acceptance pending
+Status: Implemented; Rust migration complete, post-migration device acceptance pending
 
-Implementation: `moos-gateway-device` creates independent random device keys,
-an atomically replaced root-managed authorized-device store, status-only grants,
-individual revocation, and key rotation. Gateway v1 uses fresh server and
-client nonces with an HMAC-SHA256 challenge proof. The iOS app accepts the
-one-time manual pairing code and stores the key with ThisDeviceOnly Keychain
-protection. Automated wrong-key, nonce-binding, malformed-input, revocation,
-rotation, and permission tests pass. A real paired iPhone has not yet been
-observed from this Linux development environment.
+Implementation: the production `moos-gateway` and `moos-gateway-device` are
+synchronous Rust binaries built with exact Rust 1.97.1 and `Cargo.lock`.
+`moos-gateway-device` creates independent random device keys, an atomically
+replaced root-managed authorized-device store, status-only grants, individual
+revocation, and key rotation. Gateway v1 uses fresh server and client nonces
+with an HMAC-SHA256 challenge proof. The iOS app accepts the one-time manual
+pairing code and stores the key with ThisDeviceOnly Keychain protection. The
+schema, keys, UUIDs, pairing code, HMAC transcripts, grants, and paths remain
+compatible with the Python implementation, which is no longer installed or
+executed. Automated cross-client, malformed-input, revocation, rotation,
+concurrent-store, permission, and denial-before-backend tests pass. A real
+paired iPhone reconnect after replacing the installed service remains pending.
 
 ## Slice M8 — Tailscale host transport
 
@@ -252,15 +256,18 @@ Do not do yet: public WAN exposure or transport-specific client logic.
 
 Status: Partial; authenticated status transport implemented, terminal pending
 
-Implementation: the separate unprivileged `moos-gateway` requires the explicit
-listen address to be assigned to `tailscale0`, refuses addresses outside
-Tailscale's IPv4 and IPv6 ranges, and is additionally restricted by systemd
-interface/IP policy. It authenticates before opening the local control channel
-and authorizes every Protocol-v1 request. `moosd` independently restricts that
+Implementation: the separate unprivileged Rust `moos-gateway` binds the actual
+listener to `tailscale0` with `SO_BINDTODEVICE`, refuses addresses outside
+Tailscale's IPv4 and IPv6 ranges, and retains the existing systemd interface/IP
+policy, empty capability set, and address-family allowlist. It needs no
+Netlink access. It authenticates before opening the local control channel and
+authorizes every Protocol-v1 request. `moosd` independently restricts that
 Gateway Unix peer to `status`. Automated socket tests verify valid forwarding,
-deny-before-backend, an absolute auth deadline, live revocation, generic auth
-failures, and Tailscale-interface binding. The roadmap's remote terminal
-acceptance remains deliberately unimplemented.
+deny-before-backend, absolute auth and idle deadlines, live revocation,
+generic auth failures, and Tailscale-interface binding. The installer consumes
+only matching prebuilt release binaries and restores the prior installation if
+service activation fails. The roadmap's remote terminal acceptance remains
+deliberately unimplemented.
 
 ## Slice I1 — Native iOS project foundation
 

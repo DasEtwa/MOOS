@@ -251,6 +251,7 @@ without exposing the local daemon socket.
 Install it only after Tailscale and the local control plane are working:
 
 ~~~bash
+./scripts/build-gateway.sh
 sudo ./scripts/setup-gateway.sh \
   --tailscale-address "$(tailscale ip -4)" \
   --port 7411
@@ -260,7 +261,10 @@ sudo moos-gateway-device add --name "My iPhone" --allow status
 The second command prints a pairing code once. Enter that code with the Host's
 Tailscale address and port in the iOS app. Device keys are stored in the iOS
 Keychain and the root-managed Host device store; they are never committed.
-See `GATEWAY.md` for the exact handshake and authorization boundary.
+The Gateway is a pinned, lockfile-reproducible Rust service; its installer only
+accepts prebuilt matching release artifacts and rolls back the prior service
+files when activation fails. See `GATEWAY.md` for the exact handshake,
+compatibility, installation, rollback, and authorization boundary.
 
 ## Phase 1/2 smoke test
 

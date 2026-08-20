@@ -128,14 +128,16 @@ These languages are not currently present in MOOS. When introduced:
 
 ### Rust
 
-Rust is not currently present in MOOS. When a long-running service or protocol
-requires it:
+Rust is used for the Host-side authenticated Gateway. For long-running
+services and protocol code:
 
 - Use a pinned toolchain and reproducible dependency resolution.
 - Run cargo fmt, cargo clippy, and focused tests in CI or local checks.
 - Model protocol and authorization failures explicitly.
 - Avoid unwrap or expect on externally controlled or long-lived paths.
 - Drop privileges and minimize capabilities before serving remote requests.
+- Keep release builds separate from privileged installation; setup scripts
+  must consume validated prebuilt artifacts and must not invoke Cargo as root.
 
 ### Python
 

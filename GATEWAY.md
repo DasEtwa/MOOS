@@ -117,9 +117,27 @@ The service refuses unsafe file ownership, modes, symlinks, hard links, or
 unexpected process supplementary groups. A root-owned non-secret UID record
 lets `moosd` retain the status-only peer boundary during NSS/account failure.
 
-The service refuses non-Tailscale listen addresses and addresses that are not
-assigned to `tailscale0`; its systemd sandbox also restricts network access to
-that interface and the Tailscale IPv4 `100.64.0.0/10` and IPv6
+The production Gateway and `moos-gateway-device` are synchronous Rust
+binaries. Rust owns bounded framing, HMAC authentication, store validation,
+authorization, admission limits, and forwarding; there is no Python execution
+path in the installed service. `rust-toolchain.toml` pins Rust 1.97.1 and
+`Cargo.lock` fixes dependency resolution. The canonical release artifacts are
+built as an unprivileged user with `scripts/build-gateway.sh`; the root setup
+script never runs Cargo or downloads code.
+
+The on-disk format remains exactly `schemaVersion: 1`. Device fields, UUID
+format, key encoding, lock filename, pairing-code prefix, HMAC transcripts,
+grants, service arguments, binary paths, and state paths are unchanged. The
+existing iPhone credential is therefore designed to reconnect without a new
+pairing code. That compatibility is covered by shared Swift/Rust vectors and
+store tests; a real post-migration reconnect still needs to be observed on the
+Host.
+
+The service refuses non-Tailscale listen addresses. It binds its listener with
+`SO_BINDTODEVICE` to `tailscale0` before binding the configured address, so the
+same socket both validates and enforces the interface assignment without
+requiring Netlink. Its unchanged systemd sandbox also restricts network access
+to that interface and the Tailscale IPv4 `100.64.0.0/10` and IPv6
 `fd7a:115c:a1e0::/48` ranges. Supporting public WAN or ordinary LAN listeners
 would require a separately reviewed encrypted transport and is outside Gateway
 v1.
@@ -129,10 +147,12 @@ v1.
 Install Tailscale on the Host and iPhone, sign both into the intended tailnet,
 and use a tailnet ACL to allow the iPhone to reach only the Gateway TCP port.
 Then refresh the local control plane (this installs the `moosd` Gateway peer
-restriction) and install the Gateway on the Host:
+restriction), build the pinned release as your normal user, and install the
+validated artifacts on the Host:
 
 ```sh
 sudo ./scripts/setup-control-plane.sh --source-root "$PWD"
+./scripts/build-gateway.sh
 sudo ./scripts/setup-gateway.sh \
   --tailscale-address "$(tailscale ip -4)" \
   --port 7411 \
@@ -163,3 +183,16 @@ does not revoke the Host record. Revoke it explicitly when retiring a device:
 ```sh
 sudo moos-gateway-device revoke DEVICE_ID
 ```
+
+The installer validates that both artifacts are regular mode-0755 files with
+one link and exactly matching version output. It validates an existing device
+store without recreating, rewriting, or silently repairing it, then atomically
+installs both binaries. If file
+replacement, systemd reload, restart, or the active-service check fails, it
+restores the prior binaries, unit, and configuration. Reinstalling the previous
+tagged checkout is also schema-compatible; do not copy the secret device store
+into Git or an ad-hoc rollback bundle.
+
+The current stripped x86-64 release artifacts are approximately 654 KB for the
+service and 560 KB for the administrator tool. They run outside the guest, so
+the MOOS rootfs size and boot path are unchanged.
