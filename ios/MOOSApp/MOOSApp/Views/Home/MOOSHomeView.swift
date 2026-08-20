@@ -120,7 +120,7 @@ private struct ConfiguredHostView: View {
                     .font(.title3.weight(.semibold))
                 if let address = snapshot.host?.address,
                    let port = snapshot.host?.port {
-                    Text("\(address):\(port)")
+                    Text(verbatim: "\(address):\(port)")
                         .font(.caption.monospaced())
                         .foregroundStyle(MOOSTheme.secondaryText)
                 }
