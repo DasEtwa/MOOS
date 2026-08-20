@@ -123,15 +123,21 @@ authorization, admission limits, and forwarding; there is no Python execution
 path in the installed service. `rust-toolchain.toml` pins Rust 1.97.1 and
 `Cargo.lock` fixes dependency resolution. The canonical release artifacts are
 built as an unprivileged user with `scripts/build-gateway.sh`; the root setup
-script never runs Cargo or downloads code.
+script never runs Cargo or downloads code. It accepts normal Cargo hardlinks
+and checkout filesystem modes only as untrusted input, copies the artifacts to
+root-owned mode-0755 staging files, and executes them solely as the locked
+`moos-gateway` identity inside a transient systemd sandbox. The validator uses
+a non-secret empty device store, a private PID namespace, and cannot access the
+real device store or `moosd` socket. The reviewed service unit is pinned by its
+SHA-256 digest before systemd activation.
 
 The on-disk format remains exactly `schemaVersion: 1`. Device fields, UUID
 format, key encoding, lock filename, pairing-code prefix, HMAC transcripts,
 grants, service arguments, binary paths, and state paths are unchanged. The
 existing iPhone credential is therefore designed to reconnect without a new
 pairing code. That compatibility is covered by shared Swift/Rust vectors and
-store tests; a real post-migration reconnect still needs to be observed on the
-Host.
+store tests. Real iPhone authentication against the Rust service was observed
+on 2026-08-20 without changing the existing Gateway-v1 wire format.
 
 The service refuses non-Tailscale listen addresses. It binds its listener with
 `SO_BINDTODEVICE` to `tailscale0` before binding the configured address, so the
@@ -184,14 +190,25 @@ does not revoke the Host record. Revoke it explicitly when retiring a device:
 sudo moos-gateway-device revoke DEVICE_ID
 ```
 
-The installer validates that both artifacts are regular mode-0755 files with
-one link and exactly matching version output. It validates an existing device
-store without recreating, rewriting, or silently repairing it, then atomically
-installs both binaries. If file
-replacement, systemd reload, restart, or the active-service check fails, it
-restores the prior binaries, unit, and configuration. Reinstalling the previous
-tagged checkout is also schema-compatible; do not copy the secret device store
-into Git or an ad-hoc rollback bundle.
+The Gateway reloads the device record before every Protocol-v1 operation. A
+revoked or rotated key therefore cannot issue another status request on an
+already authenticated TCP connection; the server returns `forbidden` and
+closes that session. The iOS app polls status every five seconds while active,
+so its visible state changes to Disconnected on the next poll. Tailscale cannot
+override this application-level decision. When multiple records have the same
+display name, use the device ID logged by `moos-gateway` to revoke the concrete
+credential in use.
+
+The installer statically accepts bounded regular ELF inputs, including Cargo's
+usual hardlinks, then gives only the root-owned staging copies canonical mode
+0755. Matching version, address/interface, process identity, and temporary
+device-store validation happens inside the sandbox before activation. An
+existing real device store is never rewritten or silently repaired. If file
+replacement, systemd reload, restart, or the active-service check fails, the
+installer attempts to restore the prior binaries, unit, configuration, and
+documentation.
+Reinstalling the previous tagged checkout is also schema-compatible; do not
+copy the secret device store into Git or an ad-hoc rollback bundle.
 
 The current stripped x86-64 release artifacts are approximately 654 KB for the
 service and 560 KB for the administrator tool. They run outside the guest, so

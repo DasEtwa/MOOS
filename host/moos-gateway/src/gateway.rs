@@ -213,6 +213,10 @@ impl GatewaySession {
                     device
                 }
                 _ => {
+                    eprintln!(
+                        "revoked MOOS device {}; closing session",
+                        authenticated.device_id
+                    );
                     let _ =
                         send_control_error_to(&mut remote, "forbidden", "Device access revoked");
                     return;

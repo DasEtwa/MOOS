@@ -81,14 +81,35 @@ def main():
     )
     require("Tailscale-only", dry_run, "Tailscale-only install plan")
     require("remote grants: status only", dry_run, "status-only authorization")
-    require(f"Rust release {version}", dry_run, "versioned Rust runtime plan")
+    require("prebuilt Rust artifacts", dry_run, "Rust runtime plan")
+    require("root-owned staging", dry_run, "privileged staging boundary")
+    require("Cargo hardlinks", dry_run, "normal Cargo artifact support")
     require("host mutation: none", dry_run, "non-mutating dry run")
 
     with tempfile.TemporaryDirectory() as temporary:
         binary_root = Path(temporary)
-        shutil.copy2("/bin/true", binary_root / "moos-gateway")
-        shutil.copy2("/bin/true", binary_root / "moos-gateway-device")
-        for binary in binary_root.iterdir():
+        for name, source in (
+            ("moos-gateway", GATEWAY),
+            ("moos-gateway-device", DEVICE_ADMIN),
+        ):
+            binary = binary_root / name
+            shutil.copy2(source, binary)
+            binary.chmod(0o775)
+            (binary_root / f"{name}.cargo-deps").hardlink_to(binary)
+        run(
+            SETUP,
+            "--tailscale-address",
+            "100.64.0.1",
+            "--binary-dir",
+            str(binary_root),
+            "--dry-run",
+        )
+
+    with tempfile.TemporaryDirectory() as temporary:
+        binary_root = Path(temporary)
+        for name in ("moos-gateway", "moos-gateway-device"):
+            binary = binary_root / name
+            binary.write_text("not an executable\n", encoding="utf-8")
             binary.chmod(0o755)
         run(
             SETUP,
@@ -134,6 +155,25 @@ def main():
     )
     if 'chown root:"$GATEWAY_GROUP" "$STATE_ROOT/devices.json"' in setup:
         raise AssertionError("installer silently repairs an existing secret store")
+    root_boundary = setup.index('[ "$(id -u)" -eq 0 ]')
+    before_root_boundary = setup[:root_boundary]
+    if (
+        "--version" in before_root_boundary
+        or "validate-address" in before_root_boundary
+        or '\n"$BINARY_ROOT/' in before_root_boundary
+    ):
+        raise AssertionError("installer executes checkout artifacts before root-owned staging")
+    for policy in (
+        "run_staged_validation",
+        "PrivatePIDs=yes",
+        'InaccessiblePaths=$STATE_ROOT -/run/moos',
+        '"$STAGED_GATEWAY" check-config',
+        "systemd unit does not match the reviewed policy",
+        "systemctl restart moos-gateway.service || rollback_failed=1",
+        "systemctl stop moos-gateway.service || rollback_failed=1",
+        "rollback files were preserved for recovery",
+    ):
+        require(policy, setup, "staged installer validation")
     for retired in (
         REPO_ROOT / "host" / "moos_gateway.py",
         REPO_ROOT / "host" / "moos_gateway_auth.py",

@@ -13,6 +13,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 enum Command {
     Run(Options),
+    CheckConfig(Options),
     ValidateAddress(Options),
     ValidateInterface(Options),
     Help,
@@ -29,6 +30,7 @@ struct Options {
 fn usage() -> &'static str {
     "Usage:
   moos-gateway --listen-address IP --port PORT [--devices PATH] [--moosd-socket PATH]
+  moos-gateway check-config --listen-address IP --port PORT [--devices PATH]
   moos-gateway validate-address --listen-address IP --port PORT
   moos-gateway validate-interface --listen-address IP --port PORT
   moos-gateway --version
@@ -82,6 +84,9 @@ fn parse_command(arguments: &[String]) -> Result<Command, String> {
     match arguments {
         [flag] if flag == "-h" || flag == "--help" => Ok(Command::Help),
         [flag] if flag == "--version" => Ok(Command::Version),
+        [first, rest @ ..] if first == "check-config" => {
+            Ok(Command::CheckConfig(parse_options(rest)?))
+        }
         [first, rest @ ..] if first == "validate-address" => {
             Ok(Command::ValidateAddress(parse_options(rest)?))
         }
@@ -110,6 +115,7 @@ fn main() -> ExitCode {
             println!("moos-gateway {VERSION}");
             ExitCode::SUCCESS
         }
+        Command::CheckConfig(options) => check_config(options),
         Command::ValidateAddress(options) => {
             match validate_tailscale_address(&options.listen_address) {
                 Ok(_) => ExitCode::SUCCESS,
@@ -130,6 +136,23 @@ fn main() -> ExitCode {
         }
         Command::Run(options) => run(options),
     }
+}
+
+fn check_config(options: Options) -> ExitCode {
+    if let Err(error) = validate_tailscale_address(&options.listen_address) {
+        eprintln!("error: {error}");
+        return ExitCode::from(2);
+    }
+    if let Err(error) = validate_process_identity() {
+        eprintln!("error: {error}");
+        return ExitCode::from(1);
+    }
+    let devices = DeviceStore::with_expected_owner(options.devices, 0, getegid().as_raw());
+    if let Err(error) = devices.load() {
+        eprintln!("error: invalid device store: {error}");
+        return ExitCode::from(1);
+    }
+    ExitCode::SUCCESS
 }
 
 fn run(options: Options) -> ExitCode {
@@ -188,5 +211,20 @@ mod tests {
             Ok(Command::Version)
         ));
         assert!(parse_command(&arguments(&["--version", "x"])).is_err());
+    }
+
+    #[test]
+    fn check_config_requires_normal_listener_options() {
+        assert!(matches!(
+            parse_command(&arguments(&[
+                "check-config",
+                "--listen-address",
+                "100.64.0.1",
+                "--port",
+                "7411",
+            ])),
+            Ok(Command::CheckConfig(_))
+        ));
+        assert!(parse_command(&arguments(&["check-config"])).is_err());
     }
 }
