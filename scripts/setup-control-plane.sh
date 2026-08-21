@@ -16,8 +16,8 @@ CURRENT_LINK="$LIBEXEC_ROOT/control-current"
 UNIT_ROOT='/etc/systemd/system'
 DOC_ROOT='/usr/share/doc/moos'
 DAEMON_VERSION='MOOS control daemon 1'
-SERVICE_SHA256='a7118885074ae7c7bc3382a10e1345d7076278322db75aa0cdc12fd6886d8d3a'
-SOCKET_SHA256='7fe8640f85a4142879077fb222d7d4ea3a57f78222c75aa53e1f6f0c3ec7bb12'
+MANIFEST_RELATIVE='configs/control-plane-manifest.sha256'
+MANIFEST_SHA256='a38c4a084f453e1f04618e2519ad05508f81004aeb5aeb5a5574160452be6e3c'
 DRY_RUN=0
 
 usage() {
@@ -66,29 +66,31 @@ done
 SOURCE_ROOT=$(cd -- "$SOURCE_ROOT" && pwd)
 
 # This verifier is isolated from site customization and never imports or
-# executes code from the developer checkout. The staging pass repeats these
-# checks so a file changed after this preflight cannot bypass them.
-python3 -I - "$SOURCE_ROOT" "$SERVICE_SHA256" "$SOCKET_SHA256" <<'PY'
+# executes code from the developer checkout. The reviewed manifest digest is
+# embedded in this installer, and every staged artifact must match that
+# manifest again when it is copied into root-owned storage.
+python3 -I - "$SOURCE_ROOT" "$MANIFEST_RELATIVE" "$MANIFEST_SHA256" <<'PY'
 import ast
 import hashlib
 import os
+import re
 import stat
 import sys
 
-root, service_hash, socket_hash = sys.argv[1:]
-files = {
-    "host/moos_protocol.py": None,
-    "host/moos_runtime.py": None,
-    "host/moosd.py": None,
-    "scripts/moos": None,
-    "scripts/moosd.py": None,
-    "scripts/run-instance.sh": None,
-    "systemd/moosd.service": service_hash,
-    "systemd/moosd.socket": socket_hash,
-    "HOST_GUEST_ISOLATION.md": None,
+root, manifest_relative, manifest_hash = sys.argv[1:]
+required_files = {
+    "host/moos_protocol.py",
+    "host/moos_runtime.py",
+    "host/moosd.py",
+    "scripts/moos",
+    "scripts/moosd.py",
+    "scripts/run-instance.sh",
+    "systemd/moosd.service",
+    "systemd/moosd.socket",
+    "HOST_GUEST_ISOLATION.md",
 }
 
-for relative, expected_hash in files.items():
+def read_regular(relative):
     path = os.path.join(root, relative)
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -114,13 +116,30 @@ for relative, expected_hash in files.items():
             raise SystemExit(f"error: source changed while being inspected: {relative}")
     finally:
         os.close(fd)
+    return data
+
+manifest_data = read_regular(manifest_relative)
+if hashlib.sha256(manifest_data).hexdigest() != manifest_hash:
+    raise SystemExit("error: control-plane manifest is not the reviewed version")
+
+files = {}
+for line in manifest_data.decode("ascii").splitlines():
+    match = re.fullmatch(r"([0-9a-f]{64})  ([A-Za-z0-9_./-]+)", line)
+    if match is None or match.group(2) in files:
+        raise SystemExit("error: invalid control-plane manifest")
+    files[match.group(2)] = match.group(1)
+if set(files) != required_files:
+    raise SystemExit("error: control-plane manifest has unexpected entries")
+
+for relative, expected_hash in files.items():
+    data = read_regular(relative)
     if relative.endswith(".py") or relative in {"scripts/moos", "scripts/moosd.py"}:
         try:
             ast.parse(data, filename=relative)
         except (SyntaxError, ValueError) as exc:
             raise SystemExit(f"error: invalid Python source {relative}: {exc}")
-    if expected_hash and hashlib.sha256(data).hexdigest() != expected_hash:
-        raise SystemExit(f"error: unexpected privileged unit content: {relative}")
+    if hashlib.sha256(data).hexdigest() != expected_hash:
+        raise SystemExit(f"error: source does not match reviewed manifest: {relative}")
 PY
 
 if [ "$DRY_RUN" -eq 1 ]; then
@@ -130,7 +149,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
     printf 'socket: /run/moos/moosd.sock (root:%s, mode 0660)\n' "$CONTROL_GROUP"
     printf 'runtime: systemd socket activation, restart on failure, journald logging\n'
     printf 'installed code: %s (root-owned, versioned releases)\n' "$RELEASE_ROOT"
-    printf 'validation: staged code runs sandboxed as %s\n' "$VALIDATION_USER"
+    printf 'validation: digest-bound staged code runs sandboxed as %s\n' "$VALIDATION_USER"
     printf 'activation: atomic release pointer with transactional rollback\n'
     printf 'sudo policy: none\n'
     printf 'host mutation: none (dry-run)\n'
@@ -142,7 +161,7 @@ fi
     echo '       use --dry-run as a normal user to inspect the plan' >&2
     exit 1
 }
-for command_name in cp date getent groupadd install ln mktemp mv python3 rm systemctl systemd-run; do
+for command_name in cp date getent groupadd install ln mktemp mv python3 rm systemctl systemd-run timeout; do
     command -v "$command_name" >/dev/null 2>&1 || {
         echo "error: required host command is missing: $command_name" >&2
         exit 1
@@ -264,15 +283,45 @@ finally:
 PY
 }
 
-stage_file "$SOURCE_ROOT/host/moos_protocol.py" "$STAGING/moos_protocol.py" 0644
-stage_file "$SOURCE_ROOT/host/moos_runtime.py" "$STAGING/moos_runtime.py" 0644
-stage_file "$SOURCE_ROOT/host/moosd.py" "$STAGING/moosd.py" 0644
-stage_file "$SOURCE_ROOT/scripts/moos" "$STAGING/moos" 0755
-stage_file "$SOURCE_ROOT/scripts/moosd.py" "$STAGING/moosd" 0755
-stage_file "$SOURCE_ROOT/scripts/run-instance.sh" "$STAGING/run-instance.sh" 0755
-stage_file "$SOURCE_ROOT/systemd/moosd.service" "$STAGING/moosd.service" 0644 "$SERVICE_SHA256"
-stage_file "$SOURCE_ROOT/systemd/moosd.socket" "$STAGING/moosd.socket" 0644 "$SOCKET_SHA256"
-stage_file "$SOURCE_ROOT/HOST_GUEST_ISOLATION.md" "$STAGING/HOST_GUEST_ISOLATION.md" 0644
+stage_file "$SOURCE_ROOT/$MANIFEST_RELATIVE" \
+    "$STAGING/control-plane-manifest.sha256" 0644 "$MANIFEST_SHA256"
+
+manifest_hash() {
+    python3 -I - "$STAGING/control-plane-manifest.sha256" "$1" <<'PY'
+import re
+import sys
+
+manifest, requested = sys.argv[1:]
+matches = []
+with open(manifest, "r", encoding="ascii") as handle:
+    for line in handle:
+        match = re.fullmatch(r"([0-9a-f]{64})  ([A-Za-z0-9_./-]+)\n?", line)
+        if match is not None and match.group(2) == requested:
+            matches.append(match.group(1))
+if len(matches) != 1:
+    raise SystemExit(f"error: missing or duplicate manifest entry: {requested}")
+print(matches[0])
+PY
+}
+
+stage_file "$SOURCE_ROOT/host/moos_protocol.py" "$STAGING/moos_protocol.py" 0644 \
+    "$(manifest_hash host/moos_protocol.py)"
+stage_file "$SOURCE_ROOT/host/moos_runtime.py" "$STAGING/moos_runtime.py" 0644 \
+    "$(manifest_hash host/moos_runtime.py)"
+stage_file "$SOURCE_ROOT/host/moosd.py" "$STAGING/moosd.py" 0644 \
+    "$(manifest_hash host/moosd.py)"
+stage_file "$SOURCE_ROOT/scripts/moos" "$STAGING/moos" 0755 \
+    "$(manifest_hash scripts/moos)"
+stage_file "$SOURCE_ROOT/scripts/moosd.py" "$STAGING/moosd" 0755 \
+    "$(manifest_hash scripts/moosd.py)"
+stage_file "$SOURCE_ROOT/scripts/run-instance.sh" "$STAGING/run-instance.sh" 0755 \
+    "$(manifest_hash scripts/run-instance.sh)"
+stage_file "$SOURCE_ROOT/systemd/moosd.service" "$STAGING/moosd.service" 0644 \
+    "$(manifest_hash systemd/moosd.service)"
+stage_file "$SOURCE_ROOT/systemd/moosd.socket" "$STAGING/moosd.socket" 0644 \
+    "$(manifest_hash systemd/moosd.socket)"
+stage_file "$SOURCE_ROOT/HOST_GUEST_ISOLATION.md" "$STAGING/HOST_GUEST_ISOLATION.md" 0644 \
+    "$(manifest_hash HOST_GUEST_ISOLATION.md)"
 chmod 0755 "$STAGING"
 
 run_sandboxed() {
@@ -422,6 +471,8 @@ systemctl daemon-reload
 systemctl enable moosd.socket
 systemctl restart moosd.socket
 systemctl is-active --quiet moosd.socket
+timeout 10 /usr/bin/moos --socket /run/moos/moosd.sock status >/dev/null
+systemctl is-active --quiet moosd.service
 
 SUCCESS=1
 ACTIVATING=0

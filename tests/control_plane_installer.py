@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -14,6 +15,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = REPO_ROOT / "scripts" / "setup-control-plane.sh"
 SOURCES = (
+    "configs/control-plane-manifest.sha256",
     "host/moos_protocol.py",
     "host/moos_runtime.py",
     "host/moosd.py",
@@ -51,6 +53,21 @@ def expect_rejected(source: Path, needle: str) -> None:
 
 def main() -> int:
     installer = INSTALLER.read_text(encoding="utf-8")
+    manifest_path = REPO_ROOT / "configs/control-plane-manifest.sha256"
+    manifest = {}
+    for line in manifest_path.read_text(encoding="ascii").splitlines():
+        digest, relative = line.split("  ", 1)
+        assert re.fullmatch(r"[0-9a-f]{64}", digest), digest
+        assert relative not in manifest, relative
+        manifest[relative] = digest
+    expected_manifest_sources = set(SOURCES) - {"configs/control-plane-manifest.sha256"}
+    assert set(manifest) == expected_manifest_sources
+    for relative, digest in manifest.items():
+        assert hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest() == digest
+        assert f'"$(manifest_hash {relative})"' in installer
+    manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    assert f"MANIFEST_SHA256='{manifest_digest}'" in installer
+
     for required in (
         "python3 -I -",
         "systemd-run",
@@ -61,6 +78,8 @@ def main() -> int:
         "stop_if_loaded()",
         "os.O_EXCL",
         'trap cleanup EXIT HUP INT TERM',
+        'timeout 10 /usr/bin/moos --socket /run/moos/moosd.sock status',
+        "systemctl is-active --quiet moosd.service",
     ):
         assert required in installer, required
     rollback_match = re.search(r"\nrollback\(\) \{(?P<body>.*?)\n\}", installer, re.DOTALL)
@@ -138,7 +157,21 @@ def main() -> int:
         copy_source(changed_unit)
         with (changed_unit / "systemd/moosd.service").open("a", encoding="utf-8") as handle:
             handle.write("\n# unreviewed privileged change\n")
-        expect_rejected(changed_unit, "unexpected privileged unit content")
+        expect_rejected(changed_unit, "source does not match reviewed manifest")
+
+        changed_runtime = root / "changed-runtime"
+        copy_source(changed_runtime)
+        with (changed_runtime / "host/moos_runtime.py").open("a", encoding="utf-8") as handle:
+            handle.write("\n# syntactically valid checkout swap\n")
+        expect_rejected(changed_runtime, "source does not match reviewed manifest")
+
+        changed_manifest = root / "changed-manifest"
+        copy_source(changed_manifest)
+        with (changed_manifest / "configs/control-plane-manifest.sha256").open(
+            "a", encoding="ascii"
+        ) as handle:
+            handle.write("\n")
+        expect_rejected(changed_manifest, "manifest is not the reviewed version")
 
         release = root / "release"
         release.mkdir()
@@ -168,8 +201,8 @@ def main() -> int:
         subprocess.run([str(release / "moos"), "--help"], capture_output=True, check=True)
 
     print("MOOS control-plane installer test: PASS")
-    print("  checkout inputs: no-follow, single-link, syntax and unit hash checked")
-    print("  release: self-contained, staged validation and transactional activation")
+    print("  checkout inputs: all release artifacts bound to a reviewed manifest")
+    print("  release: staged validation, live status probe and transactional activation")
     return 0
 
 

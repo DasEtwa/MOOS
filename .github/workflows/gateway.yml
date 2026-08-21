@@ -11,7 +11,11 @@ on:
       - "host/moos-gateway/**"
       - "host/moosd.py"
       - "host/moos_protocol.py"
+      - "host/moos_runtime.py"
       - "scripts/build-gateway.sh"
+      - "scripts/moos"
+      - "scripts/moosd.py"
+      - "scripts/run-instance.sh"
       - "scripts/setup-control-plane.sh"
       - "scripts/setup-gateway.sh"
       - "systemd/moos-gateway.service"
@@ -21,7 +25,12 @@ on:
       - "tests/fixtures/gateway-v1-contract.json"
       - "tests/protocol_contract.py"
       - "tests/moosd_protocol.py"
+      - "tests/control_plane_installer.py"
+      - "tests/release_profile.py"
+      - "tests/runtime_control.py"
       - "tests/runtime_isolation.py"
+      - "configs/control-plane-manifest.sha256"
+      - "HOST_GUEST_ISOLATION.md"
       - "GATEWAY.md"
       - "PROTOCOL.md"
       - "ios/MOOSApp/MOOSApp/Protocol/MOOSGatewayV1.swift"
@@ -35,7 +44,11 @@ on:
       - "host/moos-gateway/**"
       - "host/moosd.py"
       - "host/moos_protocol.py"
+      - "host/moos_runtime.py"
       - "scripts/build-gateway.sh"
+      - "scripts/moos"
+      - "scripts/moosd.py"
+      - "scripts/run-instance.sh"
       - "scripts/setup-control-plane.sh"
       - "scripts/setup-gateway.sh"
       - "systemd/moos-gateway.service"
@@ -45,7 +58,12 @@ on:
       - "tests/fixtures/gateway-v1-contract.json"
       - "tests/protocol_contract.py"
       - "tests/moosd_protocol.py"
+      - "tests/control_plane_installer.py"
+      - "tests/release_profile.py"
+      - "tests/runtime_control.py"
       - "tests/runtime_isolation.py"
+      - "configs/control-plane-manifest.sha256"
+      - "HOST_GUEST_ISOLATION.md"
       - "GATEWAY.md"
       - "PROTOCOL.md"
       - "ios/MOOSApp/MOOSApp/Protocol/MOOSGatewayV1.swift"
@@ -93,8 +111,11 @@ jobs:
             tests/gateway_protocol.py \
             tests/protocol_contract.py \
             tests/moosd_protocol.py \
+            tests/control_plane_installer.py \
+            tests/release_profile.py \
+            tests/runtime_control.py \
             tests/runtime_isolation.py
-          sh -n scripts/build-gateway.sh scripts/setup-gateway.sh
+          sh -n scripts/build-gateway.sh scripts/setup-control-plane.sh scripts/setup-gateway.sh
 
       - name: Test cross-client authentication and host integration
         run: |
@@ -105,4 +126,7 @@ jobs:
         run: |
           python3 tests/protocol_contract.py
           python3 tests/moosd_protocol.py
+          python3 tests/control_plane_installer.py
+          python3 tests/release_profile.py
+          python3 tests/runtime_control.py
           python3 tests/runtime_isolation.py
