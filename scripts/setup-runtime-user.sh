@@ -2,6 +2,21 @@
 
 set -eu
 
+PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+export PATH
+unset CDPATH ENV BASH_ENV
+
+if [ "$(id -u)" -eq 0 ]; then
+    TRUSTED_SELF=$(readlink -f -- "$0")
+    case "$TRUSTED_SELF" in
+        /usr/lib/moos/admin-releases/*/scripts/setup-runtime-user.sh) ;;
+        *)
+            echo 'error: never run runtime setup as root from a checkout' >&2
+            exit 1
+            ;;
+    esac
+fi
+
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 RUNTIME_USER='moos-runtime'
@@ -59,7 +74,7 @@ if [ ! -d "$SOURCE_ROOT" ]; then
     echo "error: source root does not exist: $SOURCE_ROOT" >&2
     exit 1
 fi
-SOURCE_ROOT=$(CDPATH= cd -- "$SOURCE_ROOT" && pwd)
+SOURCE_ROOT=$(CDPATH= cd -- "$SOURCE_ROOT" && pwd -P)
 [ -f "$SOURCE_ROOT/scripts/run-qemu.sh" ] || {
     echo 'error: source root does not contain scripts/run-qemu.sh' >&2
     exit 1
@@ -89,6 +104,13 @@ fi
     echo '       use --dry-run as a normal user to inspect the plan' >&2
     exit 1
 }
+case "$SOURCE_ROOT" in
+    /usr/lib/moos/admin-releases/*) ;;
+    *)
+        echo "error: privileged source is not an authenticated administrator release: $SOURCE_ROOT" >&2
+        exit 1
+        ;;
+esac
 
 for command_name in awk cut getent id install passwd useradd usermod; do
     command -v "$command_name" >/dev/null 2>&1 || {

@@ -152,17 +152,19 @@ v1.
 
 Install Tailscale on the Host and iPhone, sign both into the intended tailnet,
 and use a tailnet ACL to allow the iPhone to reach only the Gateway TCP port.
-Then refresh the local control plane (this installs the `moosd` Gateway peer
-restriction), build the pinned release as your normal user, and install the
-validated artifacts on the Host:
+Build the pinned Gateway and administrator bundle as a normal user, sign the
+bundle in the external release-signing environment, and authenticate it as
+described in `ADMIN_RELEASES.md`. Then refresh the local control plane and
+install the Gateway only from that root-owned release:
 
 ```sh
-sudo ./scripts/setup-control-plane.sh --source-root "$PWD"
-./scripts/build-gateway.sh
-sudo ./scripts/setup-gateway.sh \
+ADMIN_ROOT=/usr/lib/moos/admin-current
+sudo "$ADMIN_ROOT/scripts/setup-control-plane.sh" --source-root "$ADMIN_ROOT"
+sudo "$ADMIN_ROOT/scripts/setup-gateway.sh" \
   --tailscale-address "$(tailscale ip -4)" \
   --port 7411 \
-  --source-root "$PWD"
+  --source-root "$ADMIN_ROOT" \
+  --binary-dir "$ADMIN_ROOT/target/release"
 sudo moos-gateway-device add --name "My iPhone" --allow status
 ```
 

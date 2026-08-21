@@ -41,12 +41,15 @@ outside this repository.
 | scripts/run-qemu.sh | Portable QEMU launcher for the generated image |
 | scripts/setup-runtime-user.sh | One-time root setup for the locked moos-runtime account |
 | scripts/setup-control-plane.sh | Explicitly installs socket-activated local moosd |
+| scripts/build-admin-release.py | Builds the deterministic unsigned administrator bundle |
 | scripts/stage-instance.sh | Atomically stages kernel/rootfs files outside the repository |
 | scripts/run-instance.sh | Starts a staged Instance in a systemd cgroup |
 | host/moos_protocol.py | Incremental bounded NDJSON framing |
 | PROTOCOL.md | Versioned Protocol v1 contract and compatibility rules |
 | host/moos_runtime.py | Fixed Personal lifecycle/status/console adapter |
 | host/moosd.py | Typed local control and terminal service |
+| host/moos_admin_installer.py | Source for the externally provisioned root-owned trust anchor |
+| ADMIN_RELEASES.md | Signed administrator-release bootstrap and trust contract |
 | host/moos-gateway/ | Authenticated, status-only Rust Tailscale Gateway |
 | scripts/build-gateway.sh | Builds the pinned Rust Gateway release binaries |
 | scripts/setup-gateway.sh | Staged, unprivilegedly validated Gateway installer |
@@ -178,12 +181,14 @@ inspect the privileged setup; this dry-run does not change the host:
 python3 tests/runtime_isolation.py
 ~~~
 
-After reviewing it, an administrator can install the locked `moos-runtime`
+After provisioning the authenticated administrator release described in
+`ADMIN_RELEASES.md`, an administrator can install the locked `moos-runtime`
 account and private storage once:
 
 ~~~bash
-sudo ./scripts/setup-runtime-user.sh --source-root "$PWD"
-sudo ./scripts/stage-instance.sh --id luna --image-dir "$PWD/output/images"
+ADMIN_ROOT=/usr/lib/moos/admin-current
+sudo "$ADMIN_ROOT/scripts/setup-runtime-user.sh" --source-root "$ADMIN_ROOT"
+sudo "$ADMIN_ROOT/scripts/stage-instance.sh" --id luna --image-dir "$PWD/output/images"
 ~~~
 
 The account uses `nologin`, is locked, has no supplementary groups, and has no
@@ -194,7 +199,7 @@ root-owned and read-only to `moos-runtime`.
 Run the managed example with automatic I/O-device detection:
 
 ~~~bash
-sudo ./scripts/run-instance.sh --id luna
+sudo /usr/lib/moos/run-instance.sh --id luna
 ~~~
 
 This creates a transient systemd service for `moos-runtime` with a 200% CPU
@@ -226,15 +231,18 @@ non-sockets, hard-linked sockets, and unexpected owners; after connecting it
 verifies the peer UID with Linux `SO_PEERCRED`. The host path is never returned
 by the protocol.
 
-Install or refresh the runtime launcher, stage the stable Personal ID, and
-install the control plane only after reviewing both dry-runs:
+Provision the signed administrator release as documented in
+`ADMIN_RELEASES.md`. Install or refresh the runtime launcher, stage the stable
+Personal ID, and install the control plane only from that root-owned release:
 
 ~~~bash
 ./scripts/setup-runtime-user.sh --dry-run
 ./scripts/setup-control-plane.sh --dry-run
-sudo ./scripts/setup-runtime-user.sh --source-root "$PWD"
-sudo ./scripts/stage-instance.sh --id personal --image-dir "$PWD/output/images"
-sudo ./scripts/setup-control-plane.sh --source-root "$PWD"
+ADMIN_ROOT=/usr/lib/moos/admin-current
+sudo "$ADMIN_ROOT/scripts/setup-runtime-user.sh" --source-root "$ADMIN_ROOT"
+sudo "$ADMIN_ROOT/scripts/stage-instance.sh" \
+  --id personal --image-dir "$PWD/output/images"
+sudo "$ADMIN_ROOT/scripts/setup-control-plane.sh" --source-root "$ADMIN_ROOT"
 ~~~
 
 `moosd.socket` is local Unix-socket activation at `/run/moos/moosd.sock`, mode
@@ -246,11 +254,12 @@ journald logging. It creates no sudo policy. An administrator may explicitly
 add a trusted local development user to `moos-control`; that grants the narrow
 Personal API and guest console, not an arbitrary host-root shell.
 
-The installer never imports or executes Python from the developer checkout as
-root. It statically validates and no-follow copies inputs into a root-owned,
-versioned release, runs executable checks in a transient sandbox as
-`moos-runtime`, and atomically switches the active links. Unit, documentation,
-links, and prior systemd state are restored if activation fails.
+No checkout byte is parsed as an archive, imported, or executed by root before
+an externally anchored signature authenticates the exact copied administrator
+bundle. The root-owned installer then validates and stages the control plane,
+runs executable checks in a transient sandbox as `moos-runtime`, and atomically
+switches the active links. Unit, documentation, links, and prior systemd state
+are restored if activation fails.
 
 After a new login has picked up that group membership:
 
@@ -279,13 +288,18 @@ The separate MOOS Gateway adds a Tailscale-only listener, per-device
 challenge authentication, revocation, rotation, and status-only authorization
 without exposing the local daemon socket.
 
-Install it only after Tailscale and the local control plane are working:
+Build the Gateway and administrator bundle as an unprivileged user, have the
+bundle signed outside the checkout, and install it through the trust anchor as
+described in `ADMIN_RELEASES.md`. Then install the Gateway only from the
+authenticated release:
 
 ~~~bash
-./scripts/build-gateway.sh
-sudo ./scripts/setup-gateway.sh \
+ADMIN_ROOT=/usr/lib/moos/admin-current
+sudo "$ADMIN_ROOT/scripts/setup-gateway.sh" \
   --tailscale-address "$(tailscale ip -4)" \
-  --port 7411
+  --port 7411 \
+  --source-root "$ADMIN_ROOT" \
+  --binary-dir "$ADMIN_ROOT/target/release"
 sudo moos-gateway-device add --name "My iPhone" --allow status
 ~~~
 
@@ -322,15 +336,15 @@ The real terminal-bridge test uses a private mount namespace rather than
 changing host runtime state. It boots the real image, runs `moos-info` through
 `moosd`, terminates and reaps the daemon while QEMU remains alive, starts a new
 daemon, reconnects, runs `moos-info` again, and powers off cleanly. The final
-M5 acceptance test uses the privileged managed path:
+checkout-safe M5 integration test uses a private mount namespace:
 
 ~~~bash
-sudo python3 tests/managed_personal.py
+python3 tests/qemu_terminal_bridge.py
 ~~~
 
-That test refuses to disturb an existing Personal unit. It requires the
-root-only setup and staging above and verifies actual managed start/stop plus
-daemon-restart reconnect. It passed on the development host on 2026-08-17:
+That unprivileged private-namespace test verifies actual QEMU start/stop plus
+daemon-restart reconnect without interpreting checkout code as root. It passed
+on the development host on 2026-08-17:
 Personal reached the real login, `moos-info` worked through the framed bridge,
 the guest stayed running across daemon restart, the terminal reconnected, and
 managed stop reaped the processes. M5 is complete; this does not make the

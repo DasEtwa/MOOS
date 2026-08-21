@@ -2,6 +2,21 @@
 
 set -eu
 
+PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+export PATH
+unset CDPATH ENV BASH_ENV
+
+if [ "$(id -u)" -eq 0 ]; then
+    TRUSTED_SELF=$(readlink -f -- "$0")
+    case "$TRUSTED_SELF" in
+        /usr/lib/moos/admin-releases/*/scripts/stage-instance.sh) ;;
+        *)
+            echo 'error: never run Instance staging as root from a checkout' >&2
+            exit 1
+            ;;
+    esac
+fi
+
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 RUNTIME_USER='moos-runtime'
@@ -152,12 +167,20 @@ id "$RUNTIME_USER" >/dev/null 2>&1 || {
     exit 1
 }
 
-for command_name in chown cp find install mktemp mv rm rmdir; do
+for command_name in chown cp find install mktemp mv readlink rm rmdir; do
     command -v "$command_name" >/dev/null 2>&1 || {
         echo "error: required host command is missing: $command_name" >&2
         exit 1
     }
 done
+AUTHENTICATED_SCRIPT=$(readlink -f -- "$0")
+case "$AUTHENTICATED_SCRIPT" in
+    /usr/lib/moos/admin-releases/*/scripts/stage-instance.sh) ;;
+    *)
+        echo 'error: run staging only from an authenticated administrator release' >&2
+        exit 1
+        ;;
+esac
 
 [ ! -e "$INSTANCE_DIR" ] || {
     echo "error: Instance already exists: $INSTANCE_ID" >&2

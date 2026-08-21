@@ -12,12 +12,17 @@ on:
       - "host/moosd.py"
       - "host/moos_protocol.py"
       - "host/moos_runtime.py"
+      - "host/moos_admin_installer.py"
       - "scripts/build-gateway.sh"
+      - "scripts/build-admin-release.py"
       - "scripts/moos"
       - "scripts/moosd.py"
       - "scripts/run-instance.sh"
+      - "scripts/run-qemu.sh"
       - "scripts/setup-control-plane.sh"
       - "scripts/setup-gateway.sh"
+      - "scripts/setup-runtime-user.sh"
+      - "scripts/stage-instance.sh"
       - "systemd/moos-gateway.service"
       - "systemd/moosd.service"
       - "systemd/moosd.socket"
@@ -26,12 +31,16 @@ on:
       - "tests/protocol_contract.py"
       - "tests/moosd_protocol.py"
       - "tests/control_plane_installer.py"
+      - "tests/admin_release.py"
       - "tests/release_profile.py"
       - "tests/runtime_control.py"
       - "tests/runtime_isolation.py"
       - "configs/control-plane-manifest.sha256"
       - "HOST_GUEST_ISOLATION.md"
+      - "ADMIN_RELEASES.md"
       - "GATEWAY.md"
+      - "README.md"
+      - "STEPS.md"
       - "PROTOCOL.md"
       - "ios/MOOSApp/MOOSApp/Protocol/MOOSGatewayV1.swift"
       - "ios/MOOSApp/MOOSAppTests/MOOSAppTests.swift"
@@ -45,12 +54,17 @@ on:
       - "host/moosd.py"
       - "host/moos_protocol.py"
       - "host/moos_runtime.py"
+      - "host/moos_admin_installer.py"
       - "scripts/build-gateway.sh"
+      - "scripts/build-admin-release.py"
       - "scripts/moos"
       - "scripts/moosd.py"
       - "scripts/run-instance.sh"
+      - "scripts/run-qemu.sh"
       - "scripts/setup-control-plane.sh"
       - "scripts/setup-gateway.sh"
+      - "scripts/setup-runtime-user.sh"
+      - "scripts/stage-instance.sh"
       - "systemd/moos-gateway.service"
       - "systemd/moosd.service"
       - "systemd/moosd.socket"
@@ -59,12 +73,16 @@ on:
       - "tests/protocol_contract.py"
       - "tests/moosd_protocol.py"
       - "tests/control_plane_installer.py"
+      - "tests/admin_release.py"
       - "tests/release_profile.py"
       - "tests/runtime_control.py"
       - "tests/runtime_isolation.py"
       - "configs/control-plane-manifest.sha256"
       - "HOST_GUEST_ISOLATION.md"
+      - "ADMIN_RELEASES.md"
       - "GATEWAY.md"
+      - "README.md"
+      - "STEPS.md"
       - "PROTOCOL.md"
       - "ios/MOOSApp/MOOSApp/Protocol/MOOSGatewayV1.swift"
       - "ios/MOOSApp/MOOSAppTests/MOOSAppTests.swift"
@@ -102,15 +120,21 @@ jobs:
           cargo test --workspace --all-targets --locked
 
       - name: Build the canonical release binaries
-        run: ./scripts/build-gateway.sh
+        run: |
+          ./scripts/build-gateway.sh
+          ./scripts/build-admin-release.py \
+            --output "$RUNNER_TEMP/moos-admin-release.tar"
 
       - name: Compile Python development tools and validate shell
         run: |
           python3 -m py_compile \
+            host/moos_admin_installer.py \
+            scripts/build-admin-release.py \
             tests/gateway_auth.py \
             tests/gateway_protocol.py \
             tests/protocol_contract.py \
             tests/moosd_protocol.py \
+            tests/admin_release.py \
             tests/control_plane_installer.py \
             tests/release_profile.py \
             tests/runtime_control.py \
@@ -126,6 +150,7 @@ jobs:
         run: |
           python3 tests/protocol_contract.py
           python3 tests/moosd_protocol.py
+          python3 tests/admin_release.py
           python3 tests/control_plane_installer.py
           python3 tests/release_profile.py
           python3 tests/runtime_control.py

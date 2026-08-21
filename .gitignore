@@ -24,6 +24,8 @@
 /sysroot/
 /target-rootfs/
 /build/
+/moos-admin-release.tar
+/moos-admin-release.tar.sig
 
 # Logs, caches, and local runtime state.
 *.log

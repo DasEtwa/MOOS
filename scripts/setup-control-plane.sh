@@ -6,6 +6,17 @@ PATH='/usr/sbin:/usr/bin:/sbin:/bin'
 export PATH
 unset CDPATH ENV BASH_ENV PYTHONHOME PYTHONPATH
 
+if [ "$(id -u)" -eq 0 ]; then
+    TRUSTED_SELF=$(readlink -f -- "$0")
+    case "$TRUSTED_SELF" in
+        /usr/lib/moos/admin-releases/*/scripts/setup-control-plane.sh) ;;
+        *)
+            echo 'error: never run the control-plane installer as root from a checkout' >&2
+            exit 1
+            ;;
+    esac
+fi
+
 SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
 SOURCE_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 CONTROL_GROUP='moos-control'
@@ -13,19 +24,21 @@ VALIDATION_USER='moos-runtime'
 LIBEXEC_ROOT='/usr/lib/moos'
 RELEASE_ROOT="$LIBEXEC_ROOT/control-releases"
 CURRENT_LINK="$LIBEXEC_ROOT/control-current"
+ADMIN_RELEASE_ROOT="$LIBEXEC_ROOT/admin-releases"
 UNIT_ROOT='/etc/systemd/system'
 DOC_ROOT='/usr/share/doc/moos'
 DAEMON_VERSION='MOOS control daemon 1'
 MANIFEST_RELATIVE='configs/control-plane-manifest.sha256'
-MANIFEST_SHA256='a38c4a084f453e1f04618e2519ad05508f81004aeb5aeb5a5574160452be6e3c'
+MANIFEST_SHA256='8f603b18adbfd8bd8b26cd7b9e8331587e6a5e2187d162667d3458b025aa70ff'
 DRY_RUN=0
 
 usage() {
     cat <<'EOF'
 Usage: scripts/setup-control-plane.sh [options]
 
-Install the local socket-activated moosd control plane from a validated,
-root-owned release. Activation is atomic and rolls back on failure.
+Install the local socket-activated moosd control plane from an externally
+authenticated, root-owned administrator release. Activation is atomic and
+rolls back on failure. Never run this script as root from a checkout.
 
 Options:
   --source-root DIR  MOOS repository to install from.
@@ -63,13 +76,23 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-SOURCE_ROOT=$(cd -- "$SOURCE_ROOT" && pwd)
+SOURCE_ROOT=$(cd -- "$SOURCE_ROOT" && pwd -P)
+if [ "$(id -u)" -eq 0 ]; then
+    case "$SOURCE_ROOT" in
+        "$ADMIN_RELEASE_ROOT"/*) ;;
+        *)
+            echo "error: privileged source is not an authenticated administrator release: $SOURCE_ROOT" >&2
+            echo "       provision it with /usr/libexec/moos/moos-admin-installer" >&2
+            exit 1
+            ;;
+    esac
+fi
 
 # This verifier is isolated from site customization and never imports or
 # executes code from the developer checkout. The reviewed manifest digest is
 # embedded in this installer, and every staged artifact must match that
 # manifest again when it is copied into root-owned storage.
-python3 -I - "$SOURCE_ROOT" "$MANIFEST_RELATIVE" "$MANIFEST_SHA256" <<'PY'
+python3 -I - "$SOURCE_ROOT" "$MANIFEST_RELATIVE" "$MANIFEST_SHA256" "$DRY_RUN" <<'PY'
 import ast
 import hashlib
 import os
@@ -77,7 +100,8 @@ import re
 import stat
 import sys
 
-root, manifest_relative, manifest_hash = sys.argv[1:]
+root, manifest_relative, manifest_hash, dry_run = sys.argv[1:]
+require_root_owned = dry_run != "1"
 required_files = {
     "host/moos_protocol.py",
     "host/moos_runtime.py",
@@ -101,6 +125,8 @@ def read_regular(relative):
         before = os.fstat(fd)
         if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
             raise SystemExit(f"error: source must be a regular, singly-linked file: {relative}")
+        if require_root_owned and (before.st_uid != 0 or before.st_mode & 0o022):
+            raise SystemExit(f"error: authenticated source has unsafe ownership or mode: {relative}")
         if before.st_size > 1024 * 1024:
             raise SystemExit(f"error: source file exceeds 1 MiB: {relative}")
         data = b""

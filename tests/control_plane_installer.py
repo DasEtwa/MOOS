@@ -80,6 +80,8 @@ def main() -> int:
         'trap cleanup EXIT HUP INT TERM',
         'timeout 10 /usr/bin/moos --socket /run/moos/moosd.sock status',
         "systemctl is-active --quiet moosd.service",
+        '"$ADMIN_RELEASE_ROOT"/*',
+        "/usr/libexec/moos/moos-admin-installer",
     ):
         assert required in installer, required
     rollback_match = re.search(r"\nrollback\(\) \{(?P<body>.*?)\n\}", installer, re.DOTALL)

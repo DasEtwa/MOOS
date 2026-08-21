@@ -2,6 +2,21 @@
 
 set -eu
 
+PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+export PATH
+unset CDPATH ENV BASH_ENV
+
+if [ "$(id -u)" -eq 0 ]; then
+    TRUSTED_SELF=$(readlink -f -- "$0")
+    case "$TRUSTED_SELF" in
+        /usr/lib/moos/control-releases/*/run-instance.sh) ;;
+        *)
+            echo 'error: never run the managed launcher as root from a checkout' >&2
+            exit 1
+            ;;
+    esac
+fi
+
 RUNTIME_USER='moos-runtime'
 RUNTIME_GROUP='moos-runtime'
 STATE_ROOT='/var/lib/moos'
@@ -231,12 +246,20 @@ fi
     echo '       use --dry-run as a normal user to inspect the policy' >&2
     exit 1
 }
-for command_name in awk cut getent grep id passwd; do
+for command_name in awk cut getent grep id passwd readlink; do
     command -v "$command_name" >/dev/null 2>&1 || {
         echo "error: required host command is missing: $command_name" >&2
         exit 1
     }
 done
+AUTHENTICATED_SCRIPT=$(readlink -f -- "$0")
+case "$AUTHENTICATED_SCRIPT" in
+    /usr/lib/moos/control-releases/*/run-instance.sh) ;;
+    *)
+        echo 'error: run managed Instances only with the authenticated installed launcher' >&2
+        exit 1
+        ;;
+esac
 [ -x "$LIBEXEC_ROOT/run-qemu.sh" ] || {
     echo "error: installed launcher is not executable: $LIBEXEC_ROOT/run-qemu.sh" >&2
     exit 1

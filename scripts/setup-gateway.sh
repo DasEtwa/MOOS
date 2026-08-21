@@ -6,6 +6,17 @@ PATH='/usr/sbin:/usr/bin:/sbin:/bin'
 export PATH
 unset CDPATH ENV BASH_ENV PYTHONHOME PYTHONPATH
 
+if [ "$(id -u)" -eq 0 ]; then
+    TRUSTED_SELF=$(readlink -f -- "$0")
+    case "$TRUSTED_SELF" in
+        /usr/lib/moos/admin-releases/*/scripts/setup-gateway.sh) ;;
+        *)
+            echo 'error: never run Gateway setup as root from a checkout' >&2
+            exit 1
+            ;;
+    esac
+fi
+
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 SOURCE_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 GATEWAY_USER='moos-gateway'
@@ -88,7 +99,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ -n "$LISTEN_ADDRESS" ] || { echo 'error: --tailscale-address is required' >&2; exit 2; }
-SOURCE_ROOT=$(CDPATH= cd -- "$SOURCE_ROOT" && pwd)
+SOURCE_ROOT=$(CDPATH= cd -- "$SOURCE_ROOT" && pwd -P)
 [ -n "$BINARY_ROOT" ] || BINARY_ROOT="$SOURCE_ROOT/target/release"
 [ -d "$BINARY_ROOT" ] || fail "binary directory is missing: $BINARY_ROOT; run scripts/build-gateway.sh first"
 BINARY_ROOT=$(CDPATH= cd -- "$BINARY_ROOT" && pwd)
@@ -127,6 +138,10 @@ if [ "$DRY_RUN" -eq 1 ]; then
 fi
 
 [ "$(id -u)" -eq 0 ] || fail 'gateway setup must run as root; use --dry-run to inspect the plan'
+case "$SOURCE_ROOT" in
+    /usr/lib/moos/admin-releases/*) ;;
+    *) fail "privileged source is not an authenticated administrator release: $SOURCE_ROOT" ;;
+esac
 for command_name in awk chmod chown dd getent groupadd install mktemp mv passwd rm sha256sum stat systemctl systemd-run tr useradd; do
     command -v "$command_name" >/dev/null 2>&1 || fail "required host command is missing: $command_name"
 done

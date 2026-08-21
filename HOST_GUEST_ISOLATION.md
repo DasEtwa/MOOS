@@ -50,12 +50,14 @@ Inspect the setup without changing the host:
 python3 tests/runtime_isolation.py
 ~~~
 
-After explicit administrator review, activate the account and stage a named
-Instance:
+After provisioning the signed administrator release described in
+`ADMIN_RELEASES.md`, activate the account and stage a named Instance using only
+its root-owned scripts:
 
 ~~~bash
-sudo ./scripts/setup-runtime-user.sh --source-root "$PWD"
-sudo ./scripts/stage-instance.sh --id luna --image-dir "$PWD/output/images"
+ADMIN_ROOT=/usr/lib/moos/admin-current
+sudo "$ADMIN_ROOT/scripts/setup-runtime-user.sh" --source-root "$ADMIN_ROOT"
+sudo "$ADMIN_ROOT/scripts/stage-instance.sh" --id luna --image-dir "$PWD/output/images"
 ~~~
 
 `setup-runtime-user.sh` creates `moos-runtime` as a system account with a
@@ -89,7 +91,7 @@ so disconnecting a client or restarting `moosd` does not stop the guest.
 Run the managed path with:
 
 ~~~bash
-sudo ./scripts/run-instance.sh --id luna
+sudo /usr/lib/moos/run-instance.sh --id luna
 ~~~
 
 The runner uses a transient systemd service owned by `moos-runtime`, then starts
