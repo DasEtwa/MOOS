@@ -208,7 +208,18 @@ paths, no-new-privileges, and an empty capability bounding set. It retains UID
 create and stop the unprivileged instance service. Membership in
 `moos-control` grants only the typed local Personal API and guest console; no
 sudo rule is installed. Runtime socket directories are managed by systemd,
-and daemon code is installed root-owned under `/usr/lib/moos`.
+and daemon code is installed root-owned under `/usr/lib/moos`. The daemon uses
+`lstat` before connecting to reject a symlinked, hard-linked, wrongly owned, or
+non-socket console path, then validates the connected Unix peer UID with
+`SO_PEERCRED` before exchanging terminal data.
+
+The privileged control-plane installer does not import or execute code from a
+user-owned checkout as root. It performs no-follow, single-link, size, syntax,
+and pinned-unit checks, stages a root-owned versioned release, then validates
+the executables in a transient systemd sandbox as `moos-runtime`. Activation
+atomically switches stable links while the service is stopped. A rollback
+snapshot covers both units, documentation, all entry-point links, the current
+release link, and the prior socket/service state.
 
 The local socket is not published remotely. `moos-gateway` is a separate,
 unprivileged entry point that binds only to an explicit Tailscale address,
@@ -219,6 +230,14 @@ remotely permits only `status`; `moosd` also enforces that restriction from the
 Gateway's Unix peer UID. Lifecycle and terminal operations remain local. The
 guest's blank development root password therefore remains unreachable from the
 remote Gateway.
+
+The privileged Gateway installer never builds or directly executes a
+user-owned artifact as root. It accepts prebuilt Rust binaries as untrusted
+input, copies them into root-owned staging, and validates them as the locked
+`moos-gateway` identity in a transient systemd sandbox with a private PID
+namespace and non-secret temporary device store. Activation uses atomic file
+replacement while the service is stopped; unit, configuration, documentation,
+binaries, and prior systemd state are restored if activation fails.
 
 Runtime status is derived from systemd `LoadState`, `ActiveState`, `SubState`,
 and `Result`, producing `starting`, `running`, `stopping`, `stopped`, `failed`,

@@ -7,11 +7,12 @@ the mobile MVP is built around one Personal MOOS system.
 
 ## Verified foundation
 
-Complete before this roadmap: Buildroot x86_64 Linux 6.18.7, BusyBox 1.38.0,
+Complete before this roadmap: Buildroot x86_64 Linux 6.18.43 LTS, BusyBox 1.38.0,
 QEMU boot/login/networking, MOOS utilities, reboot/poweroff smoke tests,
 rootless Bubblewrap isolation, deny-by-default networking, dedicated
 `moos-runtime`, staged runtime files, and systemd/cgroup-v2 CPU/RAM/swap/task/I/O
-limits. The blank root password remains development-only.
+limits. The blank root password remains development-only; the separate release
+profile disables password root login and validates the generated image.
 
 ## Slice M1 — Personal MOOS identity
 

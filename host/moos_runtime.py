@@ -8,8 +8,10 @@ arbitrary QEMU arguments or exposes a host command interface.
 from __future__ import annotations
 
 import logging
+import pwd
 import socket
 import stat
+import struct
 import subprocess
 import threading
 import time
@@ -22,6 +24,7 @@ from typing import Callable
 PERSONAL_ID = "personal"
 UNIT_NAME = "moos-instance-personal.service"
 DEFAULT_CONSOLE_SOCKET = Path("/run/moos-instances/personal/console.sock")
+RUNTIME_USER = "moos-runtime"
 LOG = logging.getLogger(__name__)
 
 
@@ -110,6 +113,7 @@ class PersonalRuntime:
         runner: CommandRunner | None = None,
         run_instance: Path | None = None,
         console_socket: Path = DEFAULT_CONSOLE_SOCKET,
+        expected_console_uid: int | None = None,
     ) -> None:
         self.repo_root = repo_root.resolve()
         self.run_instance = (
@@ -118,6 +122,7 @@ class PersonalRuntime:
             else self.repo_root / "scripts" / "run-instance.sh"
         )
         self.console_socket = console_socket
+        self.expected_console_uid = expected_console_uid
         self._runner = runner or subprocess.run
         self._terminal_lock = threading.Lock()
 
@@ -250,11 +255,37 @@ class PersonalRuntime:
     def reboot(self) -> None:
         raise UnsupportedOperation("Personal reboot is not exposed")
 
+    def _console_uid(self) -> int:
+        if self.expected_console_uid is not None:
+            return self.expected_console_uid
+        try:
+            return pwd.getpwnam(RUNTIME_USER).pw_uid
+        except KeyError as error:
+            raise RuntimeErrorBase("Personal console owner is unavailable") from error
+
     def _console_exists(self) -> bool:
         try:
-            return stat.S_ISSOCK(self.console_socket.stat().st_mode)
-        except OSError:
+            status = self.console_socket.lstat()
+            return (
+                stat.S_ISSOCK(status.st_mode)
+                and status.st_nlink == 1
+                and status.st_uid == self._console_uid()
+            )
+        except (OSError, RuntimeErrorBase):
             return False
+
+    def _validate_console_peer(self, connection: socket.socket) -> None:
+        try:
+            credentials = connection.getsockopt(
+                socket.SOL_SOCKET,
+                socket.SO_PEERCRED,
+                struct.calcsize("3i"),
+            )
+            _, peer_uid, _ = struct.unpack("3i", credentials)
+        except (AttributeError, OSError, struct.error) as error:
+            raise RuntimeErrorBase("Personal console identity is unavailable") from error
+        if peer_uid != self._console_uid():
+            raise RuntimeErrorBase("Personal console has an unexpected peer identity")
 
     def serial_connection(self) -> SerialConnection:
         available = self.status().state == RuntimeState.RUNNING and self._console_exists()
@@ -267,6 +298,8 @@ class PersonalRuntime:
     def open_terminal(self) -> TerminalChannel:
         if self.status().state != RuntimeState.RUNNING:
             raise NotRunning(PERSONAL_ID)
+        if not self._console_exists():
+            raise RuntimeErrorBase("Personal console is unavailable")
         if not self._terminal_lock.acquire(blocking=False):
             raise TerminalBusy("Personal terminal is already in use")
 
@@ -276,6 +309,7 @@ class PersonalRuntime:
             while True:
                 try:
                     connection.connect(str(self.console_socket))
+                    self._validate_console_peer(connection)
                     break
                 except (FileNotFoundError, ConnectionRefusedError):
                     if time.monotonic() >= deadline:

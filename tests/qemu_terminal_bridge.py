@@ -44,6 +44,7 @@ def daemon_main():
         REPO_ROOT,
         runner=ActiveSystemdRunner(),
         console_socket=CONSOLE,
+        expected_console_uid=os.getuid(),
     )
     serve(CONTROL, MoosdService(runtime))
 

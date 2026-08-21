@@ -1,9 +1,8 @@
 # MOOS
 
 MOOS is a small experimental Linux distribution focused on a minimal, shell-first
-runtime that can later support controlled remote management. The core system is
-kept independent from future clients, GUIs, mobile applications, and streaming
-experiments.
+runtime with controlled remote status access. The core system remains
+independent from the native iOS client, GUIs, and streaming experiments.
 
 ## Current status
 
@@ -12,7 +11,7 @@ It is a development image, not a secure general-purpose distribution.
 
 Verified baseline:
 
-- Linux kernel 6.18.7
+- Linux kernel 6.18.43 LTS
 - BusyBox 1.38.0
 - root shell on the serial console
 - QEMU boot
@@ -30,7 +29,8 @@ app under `ios/` starts empty, imports a per-device pairing credential into the
 Keychain, performs Gateway and Protocol-v1 negotiation, and renders the real
 Personal state. Remote terminal/lifecycle control, application streaming, and
 device signing remain unimplemented. Its unsigned GitHub Release/SideStore
-distribution path is prepared without storing signing material.
+distribution channel is active; SideStore performs signing and installation
+outside this repository.
 
 ## Repository layout
 
@@ -47,6 +47,10 @@ distribution path is prepared without storing signing material.
 | PROTOCOL.md | Versioned Protocol v1 contract and compatibility rules |
 | host/moos_runtime.py | Fixed Personal lifecycle/status/console adapter |
 | host/moosd.py | Typed local control and terminal service |
+| host/moos-gateway/ | Authenticated, status-only Rust Tailscale Gateway |
+| scripts/build-gateway.sh | Builds the pinned Rust Gateway release binaries |
+| scripts/setup-gateway.sh | Staged, unprivilegedly validated Gateway installer |
+| GATEWAY.md | Gateway authentication, authorization, and installation contract |
 | ios/MOOSApp/ | Native SwiftUI client with authenticated Gateway status |
 | distribution/ios/ | Deterministic SideStore AltSource seed, release icon, and guide |
 | .github/workflows/ios.yml | Unsigned simulator tests and physical-device IPA build CI |
@@ -81,12 +85,29 @@ than incremental builds and may use about 14 GB locally.
 From the repository root:
 
 ~~~bash
-./scripts/build.sh 4
+./scripts/build.sh --jobs 4
 ~~~
 
-The optional number selects the parallel job count. The build script pins
+The optional number selects the parallel job count. The default build is the
+release profile. The build script pins
 Buildroot to commit 9ac19958f25a58df65b991ec1d7fa80b34f19eb0 and applies
-configs/moos_qemu_x86_64_defconfig.
+configs/moos_qemu_x86_64_release_defconfig.
+
+For interactive console development and the QEMU login tests, explicitly opt
+into the insecure development profile:
+
+~~~bash
+./scripts/build.sh --profile development --jobs 4
+~~~
+
+The release build fails unless `/etc/shadow` in the generated ext2 image has a
+locked root credential. Development and release settings therefore cannot be
+silently mixed.
+
+MOOS tracks the maintained Linux 6.18 LTS line. Before each release, check the
+latest 6.18 patch at kernel.org, update both guest configs, and update the
+tracked `linux` and `linux-headers` SHA-256 files together; the release-profile
+test rejects version/hash drift between those inputs.
 
 The script intentionally reapplies the tracked baseline configuration. For
 temporary experiments, use Buildroot directly after the baseline build:
@@ -114,7 +135,8 @@ QEMU user-mode NAT for development:
 ./scripts/run-qemu.sh --serial-only --network user
 ~~~
 
-Wait for `moos login:`, enter root, and leave the password empty. This
+With the explicitly selected development profile, wait for `moos login:`,
+enter root, and leave the password empty. This
 blank-password root account is intentional for the current local development
 image only; the image must not be exposed as a remote service.
 
@@ -199,7 +221,10 @@ The managed Personal unit owns
 `/run/moos-instances/personal/console.sock`. QEMU serves its serial console on
 that socket. A terminal client disconnect or `moosd` restart closes only that
 connection; systemd continues to own QEMU, and a new daemon reconnects to the
-same console endpoint. The host path is never returned by the protocol.
+same console endpoint. Before root connects, `moosd` rejects symlinks,
+non-sockets, hard-linked sockets, and unexpected owners; after connecting it
+verifies the peer UID with Linux `SO_PEERCRED`. The host path is never returned
+by the protocol.
 
 Install or refresh the runtime launcher, stage the stable Personal ID, and
 install the control plane only after reviewing both dry-runs:
@@ -220,6 +245,12 @@ no-new-privileges, a fixed operation allowlist, restart-on-failure, and
 journald logging. It creates no sudo policy. An administrator may explicitly
 add a trusted local development user to `moos-control`; that grants the narrow
 Personal API and guest console, not an arbitrary host-root shell.
+
+The installer never imports or executes Python from the developer checkout as
+root. It statically validates and no-follow copies inputs into a root-owned,
+versioned release, runs executable checks in a transient sandbox as
+`moos-runtime`, and atomically switches the active links. Unit, documentation,
+links, and prior systemd state are restored if activation fails.
 
 After a new login has picked up that group membership:
 
@@ -342,7 +373,7 @@ The current layers are intentionally small:
 3. The overlay adds MOOS-specific guest files.
 4. The host launcher starts the guest without exposing a host directory.
 
-Future host services and remote APIs must retain explicit, authenticated,
+Additional host services and remote APIs must retain explicit, authenticated,
 least-privilege operations. The Gateway uses Tailscale for encrypted transport
 reachability, never as application authentication.
 

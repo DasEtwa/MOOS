@@ -15,7 +15,7 @@ local development prototype and is not suitable for remote exposure.
 Severity: High
 Component: guest authentication
 Category: Critical for deployment
-Status: Open
+Status: Resolved for release builds; intentionally retained in development
 
 ### Problem
 
@@ -45,6 +45,14 @@ configuration. Before any remote deployment, require explicit provisioning or
 key-based authentication, disable or restrict root login, and add an
 integration check that rejects insecure release settings. Never commit a real
 password or private credential.
+
+### Resolution
+
+`configs/moos_qemu_x86_64_release_defconfig` disables password-based root
+login. `scripts/build.sh --profile release` also inspects `/etc/shadow` in the
+completed ext2 image and fails unless root is locked. The original configuration
+is now explicitly the local-development profile and keeps its blank console
+login for the existing interactive smoke tests.
 
 ## MOOS-0002
 
@@ -361,7 +369,7 @@ inactive with `Result=success`. The M5 High findings are resolved.
 | Area | Audit result |
 | --- | --- |
 | Build reproducibility | Initial workspace was not reproducible from Git; tracked pin/config/scripts now address this. |
-| Rootfs construction | Verified Buildroot overlay and 60 MiB ext2 image; root authentication remains open. |
+| Rootfs construction | Verified Buildroot overlay and 60 MiB ext2 image; release root password login is disabled and final-image validated. |
 | QEMU startup | Boot verified; generated launcher had an absolute path and is replaced by a portable wrapper. |
 | Filesystem permissions | Generated target files are build intermediates owned by the host until fakeroot image creation; final image creation was verified. |
 | Init | BusyBox init and Buildroot init scripts run; serial and tty1 gettys are intentional. |

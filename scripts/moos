@@ -13,7 +13,11 @@ from collections import deque
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MODULE_ROOT = REPO_ROOT / "host"
+SCRIPT_ROOT = Path(__file__).resolve().parent
+if (SCRIPT_ROOT / "moos_protocol.py").is_file():
+    MODULE_ROOT = SCRIPT_ROOT
+else:
+    MODULE_ROOT = REPO_ROOT / "host"
 if not MODULE_ROOT.is_dir():
     MODULE_ROOT = Path("/usr/lib/moos")
 sys.path.insert(0, str(MODULE_ROOT))

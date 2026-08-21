@@ -7,14 +7,67 @@ MOOS_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 BUILDROOT_DIR="$MOOS_ROOT/buildroot"
 OUTPUT_DIR="$MOOS_ROOT/output"
 HOST_TOOLS_DIR="$MOOS_ROOT/host-tools"
-CONFIG_FILE="$MOOS_ROOT/configs/moos_qemu_x86_64_defconfig"
+DEVELOPMENT_CONFIG="$MOOS_ROOT/configs/moos_qemu_x86_64_defconfig"
+RELEASE_CONFIG="$MOOS_ROOT/configs/moos_qemu_x86_64_release_defconfig"
 BUILDROOT_REPO='https://github.com/buildroot/buildroot.git'
 BUILDROOT_REF='9ac19958f25a58df65b991ec1d7fa80b34f19eb0'
 JOBS=4
+PROFILE='release'
 
-if [ "$#" -gt 0 ]; then
-    JOBS="$1"
-fi
+usage() {
+    cat <<'EOF'
+Usage: scripts/build.sh [JOBS] [--profile development|release] [--jobs JOBS]
+
+The default release profile disables password-based root login and verifies the
+final rootfs image before returning success. The development profile must be
+selected explicitly and keeps the insecure blank local root login.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --profile)
+            [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+            PROFILE=$2
+            shift 2
+            ;;
+        --release)
+            PROFILE='release'
+            shift
+            ;;
+        --jobs)
+            [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+            JOBS=$2
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *[!0-9]*|'')
+            echo "error: unknown argument: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+        *)
+            JOBS=$1
+            shift
+            ;;
+    esac
+done
+
+case "$PROFILE" in
+    development) CONFIG_FILE=$DEVELOPMENT_CONFIG ;;
+    release) CONFIG_FILE=$RELEASE_CONFIG ;;
+    *)
+        echo 'error: --profile must be development or release' >&2
+        exit 2
+        ;;
+esac
+case "$JOBS" in
+    ''|*[!0-9]*) echo 'error: jobs must be a positive integer' >&2; exit 2 ;;
+esac
+[ "$JOBS" -gt 0 ] || { echo 'error: jobs must be positive' >&2; exit 2; }
 
 command -v git >/dev/null 2>&1 || {
     echo "error: git is required" >&2
@@ -57,7 +110,7 @@ fi
 
 export PATH="$HOST_TOOLS_DIR:$PATH"
 
-echo "Configuring Buildroot from $CONFIG_FILE"
+echo "Configuring MOOS $PROFILE profile from $CONFIG_FILE"
 make -C "$BUILDROOT_DIR" \
     O="$OUTPUT_DIR" \
     BR2_DEFCONFIG="$CONFIG_FILE" \
@@ -65,3 +118,11 @@ make -C "$BUILDROOT_DIR" \
 
 echo "Building MOOS with $JOBS parallel jobs"
 make -C "$BUILDROOT_DIR" O="$OUTPUT_DIR" -j"$JOBS"
+
+if [ "$PROFILE" = 'release' ]; then
+    "$MOOS_ROOT/scripts/validate-release-rootfs.py" \
+        --debugfs "$OUTPUT_DIR/host/sbin/debugfs" \
+        --rootfs-image "$OUTPUT_DIR/images/rootfs.ext2"
+else
+    echo 'warning: development image permits blank-password local root login' >&2
+fi

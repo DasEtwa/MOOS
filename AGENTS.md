@@ -38,7 +38,7 @@ run and observed when the environment made that possible.
 
 ## Safety rules
 
-These rules are especially important for future remote access:
+These rules are especially important for current and future remote access:
 
 - Never expose unrestricted host root access.
 - Never make arbitrary host command execution the default API.
@@ -79,9 +79,14 @@ Keep these layers distinct:
 - remote API and protocol
 - GUI and client applications
 
-The future iOS application must use an intentional, versioned client-facing
-interface. It must not depend on internal Linux guest paths or implementation
-details.
+The native iOS application uses the intentional, versioned client-facing
+interface. It must remain independent of internal Linux guest paths and
+implementation details.
+
+Privileged installers must never execute a user-owned build artifact or import
+executable code from a developer checkout. Statically inspect inputs first,
+copy them into root-owned staging, validate executable behavior under the final
+unprivileged service identity, and only then activate the staged release.
 
 Do not lock the core system to a radial menu, desktop shell, GUI toolkit,
 streaming protocol, or mobile navigation design. Those are replaceable layers.
@@ -141,8 +146,8 @@ services and protocol code:
 
 ### Python
 
-Python is not currently present in the runtime. Use it for development tooling
-only when shell is no longer clear:
+Python is not present in the MOOS guest image. It currently implements the
+small local control plane, clients, and development tooling:
 
 - Prefer the standard library for small generators and test utilities.
 - Pin meaningful dependencies and keep them out of the guest image.
@@ -152,8 +157,7 @@ only when shell is no longer clear:
 
 ### Swift and SwiftUI
 
-Swift is future client-side work, not current MOOS runtime code. When an iOS
-client exists:
+Swift is current client-side code and is not part of the MOOS guest runtime:
 
 - Keep it dependent on the stable remote protocol, not guest internals.
 - Store credentials in the platform keychain.

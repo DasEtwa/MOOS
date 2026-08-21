@@ -86,6 +86,9 @@ def main():
     require("mode 0660", control, "bounded socket access")
     require("/run/moos (root:root, mode 0711)", control, "traversable socket directory")
     require("restart on failure, journald logging", control, "operating model")
+    require("root-owned, versioned releases", control, "versioned control releases")
+    require("staged code runs sandboxed", control, "sandboxed control validation")
+    require("atomic release pointer with transactional rollback", control, "atomic control activation")
     require("sudo policy: none", control, "sudo boundary")
     require("host mutation: none (dry-run)", control, "control setup dry-run")
 

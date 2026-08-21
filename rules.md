@@ -66,14 +66,15 @@ explicitly granted, narrowly scoped, and removable.
   client, expose a protocol version rather than relying on implicit behavior.
 - **Treat compatibility deliberately.** Changes to disk formats, Instance
   metadata, or remote protocols must remain compatible or include a migration.
-- **Keep API and GUI separate.** A future ring UI, iPhone app, or any other GUI
-  must not contain core logic. MOOS must remain functional without a GUI.
-- **Pair devices instead of sharing passwords.** Future clients should use
+- **Keep API and GUI separate.** The iPhone app and any other current or future
+  GUI must not contain core logic. MOOS must remain functional without a GUI.
+- **Pair devices instead of sharing passwords.** Remote clients must use
   device keys and explicit pairing, not one global “MOOS password”.
 - **Revoke devices individually.** A lost iPhone must be disableable without
   resetting every other authorized device.
-- **Encryption is not authentication.** Even if Tailscale is used later,
-  `moosd` must still know which authorized device is speaking.
+- **Encryption is not authentication.** Although Tailscale carries the current
+  remote transport, `moosd` must still know which authorized device is
+  speaking.
 
 ## Data, secrets, and portability
 
@@ -123,7 +124,7 @@ explicitly granted, narrowly scoped, and removable.
 - Prefer a small, composable component over a framework or service stack.
 - Add a dependency only when it solves a demonstrated problem.
 - Keep builds portable, deterministic, and reproducible where practical.
-- Keep the runtime independent from future GUIs, mobile apps, and streaming.
+- Keep the runtime independent from GUIs, mobile clients, and streaming.
 - Do not implement roadmap ideas before their prerequisites are understood.
 
 ## Architecture boundaries
@@ -134,11 +135,11 @@ Keep these areas separate:
 - host-side tooling
 - the MOOS guest and root filesystem
 - low-level system code
-- long-running services such as a future `moosd`
+- long-running services such as `moosd` and `moos-gateway`
 - remote protocols and APIs
 - GUI, mobile, and other client applications
 
-The guest must not gain host access merely because remote management is planned.
+The guest must not gain host access through remote management.
 Clients should use a deliberate, versioned interface rather than guest paths or
 internal implementation details.
 

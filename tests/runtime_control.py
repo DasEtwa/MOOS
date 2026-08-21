@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Unit-test Personal lifecycle/status behavior without changing the host."""
 
+import os
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -93,7 +95,10 @@ def main():
 
             runner = FakeRunner()
             runtime = PersonalRuntime(
-                REPO_ROOT, runner=runner, console_socket=console_path
+                REPO_ROOT,
+                runner=runner,
+                console_socket=console_path,
+                expected_console_uid=os.getuid(),
             )
 
             assert runtime.status().state == RuntimeState.STOPPED
@@ -133,12 +138,39 @@ def main():
             )
             assert runtime.status().state == RuntimeState.RUNNING
             restarted_runtime = PersonalRuntime(
-                REPO_ROOT, runner=runner, console_socket=console_path
+                REPO_ROOT,
+                runner=runner,
+                console_socket=console_path,
+                expected_console_uid=os.getuid(),
             )
             reconnect = restarted_runtime.open_terminal()
             accepted, _ = console_listener.accept()
             reconnect.close()
             accepted.close()
+
+            symlink_path = Path(temporary) / "symlink-console.sock"
+            symlink_path.symlink_to(console_path)
+            symlink_runtime = PersonalRuntime(
+                REPO_ROOT,
+                runner=runner,
+                console_socket=symlink_path,
+                expected_console_uid=os.getuid(),
+            )
+            expect_error(
+                RuntimeErrorBase,
+                symlink_runtime.open_terminal,
+                "a runtime-controlled console symlink must be rejected",
+            )
+
+            class WrongPeer:
+                def getsockopt(self, *_args):
+                    return struct.pack("3i", 123, os.getuid() + 1, os.getgid())
+
+            expect_error(
+                RuntimeErrorBase,
+                lambda: runtime._validate_console_peer(WrongPeer()),
+                "a console server with the wrong peer UID must be rejected",
+            )
 
             runner.fail_stop = False
             assert runtime.stop().state == RuntimeState.STOPPED
@@ -187,6 +219,7 @@ def main():
     print("  synchronous launch failure and duplicate start detection: ok")
     print("  failed stop and new runtime object preserve terminal reconnectability: ok")
     print("  terminal exclusivity and reconnect after disconnect: ok")
+    print("  symlinked console paths and wrong peer UIDs: rejected")
     return 0
 
 
