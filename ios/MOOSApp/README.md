@@ -97,10 +97,11 @@ Pages. Signing and installation remain entirely external in SideStore. See
 [`distribution/ios/README.md`](../../distribution/ios/README.md) for the
 Pages setting and exact release procedure.
 
-The published `ios-v0.1.3` release workflow passed. On the later default-branch
-push on 2026-09-05, the unsigned device job passed but the simulator build could
-not find the requested `iPhone 16` / `iOS 18.5` destination on the hosted runner;
-local Linux cannot reproduce that macOS runner condition.
+The published `ios-v0.1.3` release workflow passed. An earlier default-branch
+push on 2026-09-05 could not find the requested `iPhone 16` / `iOS 18.5`
+destination on the hosted runner, but the subsequent documentation-only commit
+`d96f917` passed both the simulator/unit-test and unsigned-device jobs. Local
+Linux cannot reproduce macOS runner-device availability.
 
 The equivalent project and scheme are:
 

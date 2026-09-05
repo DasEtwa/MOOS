@@ -19,9 +19,9 @@ https://dasetwa.github.io/MOOS/ios/source.json
 ```
 
 The source lists the immutable `MOOS.ipa` asset from `ios-v0.1.3` first. The
-release workflow for `ios-v0.1.3` passed; later default-branch simulator CI had
-a hosted-runner destination failure before compilation, while its unsigned
-physical-device job passed.
+release workflow for `ios-v0.1.3` passed. An earlier post-merge default-branch
+run had a hosted-runner destination failure before simulator compilation, but
+the subsequent documentation-only commit `d96f917` passed both iOS jobs.
 
 ## Release architecture
 

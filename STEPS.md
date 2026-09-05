@@ -460,12 +460,14 @@ Deviations: none.
 
 ### Current default-branch CI note — 2026-09-05
 
-The post-merge `main` checks passed for Host, Gateway, and the unsigned
-physical-device IPA. The iOS simulator job failed before compilation because
-the hosted runner did not provide the requested `iPhone 16` / `iOS 18.5`
-destination; the preceding `Low-bugs` checks passed. This is CI runner-image
-drift to resolve before treating the default-branch iOS workflow as fully green,
-not evidence that the published `ios-v0.1.3` release failed.
+The initial post-merge `main` run at `dacc9f4` passed Host, Gateway, and the
+unsigned physical-device IPA, but its iOS simulator job failed before
+compilation because the hosted runner did not provide the requested `iPhone 16`
+/ `iOS 18.5` destination. The subsequent documentation-only commit `d96f917`
+completed the iOS workflow successfully (simulator/unit tests and unsigned
+device job; run `33990323811`) and its Gateway check passed (run `33990323853`).
+The effective current checks are green; the earlier failure was runner-image
+drift, not a product failure.
 
 ## Mobile integration status
 

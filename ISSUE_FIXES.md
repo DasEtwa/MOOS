@@ -77,6 +77,10 @@ GitHub Actions verification on 2026-09-05:
   provide the requested `iPhone 16` / `iOS 18.5` destination; the preceding
   `Low-bugs` iOS run passed. This is runner-image drift, not a newly observed
   product failure.
+- The follow-up documentation-only commit `d96f917` passed both iOS jobs in
+  [33990323811](https://github.com/DasEtwa/MOOS/actions/runs/33990323811) and
+  Gateway in [33990323853](https://github.com/DasEtwa/MOOS/actions/runs/33990323853),
+  clearing the transient simulator-runner condition.
 
 No privileged MOOS installation was performed: effective post-install properties and staging under
 the real service account must also be checked on the deployment host. The
