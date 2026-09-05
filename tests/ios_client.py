@@ -135,7 +135,7 @@ def main() -> None:
     for requirement in (
         "runs-on: macos-15",
         "/Applications/Xcode_16.4.app/Contents/Developer",
-        "actions/checkout@v6",
+        "actions/checkout@",
         "persist-credentials: false",
         "python3 tests/ios_client.py",
         "CODE_SIGNING_ALLOWED=NO",
@@ -148,7 +148,7 @@ def main() -> None:
         "build-unsigned-device:",
         "./scripts/build-ios-ipa.sh",
         "MOOS.ipa",
-        "actions/upload-artifact@v7",
+        "actions/upload-artifact@",
         "MOOS-unsigned-iphoneos-arm64",
     ):
         assert device_requirement in workflow_text, (

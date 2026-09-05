@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use moos_gateway::auth::pairing_code;
 use moos_gateway::store::DeviceAdminStore;
 use nix::sys::stat::{Mode, umask};
-use nix::unistd::geteuid;
+use nix::unistd::{Group, geteuid};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -156,7 +156,14 @@ fn main() -> ExitCode {
         return ExitCode::from(1);
     }
     let _previous_umask = umask(Mode::from_bits_truncate(0o077));
-    let store = DeviceAdminStore::new(parsed.devices);
+    let group = match Group::from_name("moos-gateway") {
+        Ok(Some(group)) => group,
+        _ => {
+            eprintln!("error: moos-gateway group is unavailable");
+            return ExitCode::from(1);
+        }
+    };
+    let store = DeviceAdminStore::with_expected_owner(parsed.devices, 0, group.gid.as_raw());
     let result = match parsed.command {
         Command::Add { name, permissions } => store.add(&name, &permissions).map(|device| {
             println!("device ID: {}", device.device_id);

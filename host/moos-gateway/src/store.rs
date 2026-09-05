@@ -175,6 +175,12 @@ impl DeviceAdminStore {
         }
     }
 
+    pub fn with_expected_owner(path: impl Into<PathBuf>, uid: u32, gid: u32) -> Self {
+        Self {
+            store: DeviceStore::with_expected_owner(path, uid, gid),
+        }
+    }
+
     pub fn load(&self) -> Result<AuthorizedDevices, String> {
         self.store.load()
     }
@@ -256,7 +262,11 @@ impl DeviceAdminStore {
     where
         F: FnOnce(&mut AuthorizedDevices) -> Result<T, String>,
     {
-        ensure_parent(self.store.path())?;
+        if self.store.expected_owner.is_some() {
+            self.store.validate_parent()?;
+        } else {
+            ensure_parent(self.store.path())?;
+        }
         let lock_path = self
             .store
             .path()
@@ -427,6 +437,36 @@ mod tests {
             .map_err(|error| error.to_string())?;
         let path = directory.join("devices.json");
         Ok((directory, DeviceAdminStore::new(path)))
+    }
+
+    #[test]
+    fn admin_rejects_wrong_owner_and_parent_before_mutation() -> Result<(), String> {
+        let (directory, admin) = temporary_store("owner")?;
+        admin.add("Original", ["status"])?;
+        let before = fs::read(admin.store.path()).map_err(|e| e.to_string())?;
+        let metadata = fs::metadata(&directory).map_err(|e| e.to_string())?;
+        let wrong = DeviceAdminStore::with_expected_owner(
+            admin.store.path(),
+            metadata.uid().wrapping_add(1),
+            metadata.gid(),
+        );
+        assert!(wrong.load().is_err());
+        assert!(wrong.add("Rejected", ["status"]).is_err());
+        let checked = DeviceAdminStore::with_expected_owner(
+            admin.store.path(),
+            metadata.uid(),
+            metadata.gid(),
+        );
+        assert!(checked.load().is_ok());
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o770))
+            .map_err(|e| e.to_string())?;
+        assert!(checked.add("Rejected", ["status"]).is_err());
+        assert_eq!(
+            fs::read(admin.store.path()).map_err(|e| e.to_string())?,
+            before
+        );
+        fs::remove_dir_all(directory).map_err(|e| e.to_string())?;
+        Ok(())
     }
 
     #[test]

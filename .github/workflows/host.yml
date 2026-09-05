@@ -1,0 +1,45 @@
+name: Host and guest policy
+
+on:
+  push:
+    paths: ['host/**', 'scripts/**', 'systemd/**', 'configs/**', 'system/overlay/**', 'patches/**', 'tests/**', '.github/**']
+  pull_request:
+    paths: ['host/**', 'scripts/**', 'systemd/**', 'configs/**', 'system/overlay/**', 'patches/**', 'tests/**', '.github/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unprivileged-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      # SC1007 flags the intentional POSIX CDPATH= cd idiom in ShellCheck 0.11.
+      - name: Shell syntax and static checks
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y shellcheck
+          find scripts system/overlay -type f -exec sh -c '
+            for file do
+              if head -n 1 "$file" | grep -q "^#!/bin/sh"; then
+                sh -n "$file" && shellcheck --severity=warning --exclude=SC1007 "$file" || exit
+              fi
+            done
+          ' sh {} +
+      - name: Behavioral host and guest policy tests
+        run: |
+          python3 tests/moosd_protocol.py
+          python3 tests/moos_cli.py
+          python3 tests/runtime_control.py
+          python3 tests/runtime_isolation.py
+          python3 tests/control_plane_installer.py
+          python3 tests/release_profile.py
+          python3 tests/qemu_launcher.py
+          python3 tests/personal_identity.py
+          python3 tests/host_regressions.py
+      # Real QEMU builds and privileged systemd acceptance are explicit local
+      # checks documented in ISSUE_FIXES.md; this job never installs MOOS services.

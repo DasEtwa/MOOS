@@ -32,6 +32,9 @@ LockPersonality=yes
 MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
 RestrictAddressFamilies=AF_UNIX
+TasksMax=64
+MemoryMax=128M
+CPUQuota=50%
 CapabilityBoundingSet=
 
 [Install]

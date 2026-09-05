@@ -88,6 +88,7 @@ if [ ! -d "$BUILDROOT_DIR/.git" ]; then
     git clone "$BUILDROOT_REPO" "$BUILDROOT_DIR"
 fi
 
+printf 'MOOS Buildroot %s (%s), profile %s\n' "$BUILDROOT_RELEASE" "$BUILDROOT_REF" "$PROFILE"
 current_ref=$(git -C "$BUILDROOT_DIR" rev-parse HEAD 2>/dev/null || true)
 if [ "$current_ref" != "$BUILDROOT_REF" ]; then
     if [ -n "$(git -C "$BUILDROOT_DIR" status --porcelain)" ]; then

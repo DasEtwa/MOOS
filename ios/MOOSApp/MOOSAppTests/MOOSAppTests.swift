@@ -169,6 +169,42 @@ final class MOOSAppTests: XCTestCase {
         XCTAssertEqual(second, first)
     }
 
+    func testStateStreamCancellationPreservesOtherSubscriberAndLatestValue() async throws {
+        let service = LiveMOOSStateService(
+            store: FailingHostConfigurationStore(),
+            credentialStore: InMemoryDeviceCredentialStore(),
+            connector: TestConnector(result: .failure(.unreachable))
+        )
+        let ready = expectation(description: "first subscriber attached")
+        let first = service.snapshots()
+        let consumer = Task {
+            var iterator = first.makeAsyncIterator()
+            _ = await iterator.next()
+            ready.fulfill()
+            return await iterator.next()
+        }
+        var survivor = service.snapshots().makeAsyncIterator()
+        _ = await survivor.next()
+        await fulfillment(of: [ready], timeout: 2)
+        consumer.cancel()
+        let cancelledValue = await consumer.value
+        XCTAssertNil(cancelledValue)
+
+        for suffix in 1...3 {
+            let configuration = try HostConfiguration(
+                address: "100.64.0.\(suffix)", port: 7411,
+                deviceID: Self.deviceID, displayName: "Host \(suffix)"
+            )
+            // Invalid keys publish a deterministic local failure without networking.
+            _ = await service.configureHost(configuration, deviceKey: Data())
+        }
+        let newest = await survivor.next()
+        XCTAssertEqual(newest?.host?.displayName, "Host 3")
+        XCTAssertEqual(newest?.connectionState, .disconnected)
+        let replacement = await firstSnapshot(from: service)
+        XCTAssertEqual(replacement, newest)
+    }
+
     func testHostConfigurationPersistsAcrossStoreInstances() throws {
         let defaults = try temporaryDefaults()
         let configuration = try HostConfiguration(
