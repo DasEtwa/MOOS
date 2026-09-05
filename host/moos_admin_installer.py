@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -24,10 +25,13 @@ TRUSTED_PROGRAM = Path("/usr/libexec/moos/moos-admin-installer")
 TRUSTED_KEY = Path("/etc/moos/trust/admin-release.pem")
 RELEASE_ROOT = Path("/usr/lib/moos/admin-releases")
 CURRENT_LINK = Path("/usr/lib/moos/admin-current")
+ROLLBACK_LINK = Path("/usr/lib/moos/admin-rollback")
+RELEASE_RETENTION = 2
 OPENSSL = Path("/usr/bin/openssl")
 MAX_BUNDLE_BYTES = 160 * 1024 * 1024
 MAX_SIGNATURE_BYTES = 64 * 1024
 MAX_MEMBER_BYTES = 64 * 1024 * 1024
+RELEASE_DIGEST = re.compile(r"[0-9a-f]{64}")
 
 RELEASE_MEMBERS = {
     "GATEWAY.md": 0o644,
@@ -260,27 +264,122 @@ def activate_extracted_release(
     current_link: Path,
     *,
     expected_uid: int = 0,
+    rollback_link: Path | None = None,
+    retention: int = RELEASE_RETENTION,
 ) -> Path:
-    """Atomically activate an extracted release, preserving the old pointer."""
+    """Activate a release and retain only active and rollback releases."""
+
+    if retention < 2:
+        raise InstallError("release retention must preserve active and rollback releases")
+    if not RELEASE_DIGEST.fullmatch(digest):
+        raise InstallError("administrator release digest is invalid")
+    release_root = release_root.resolve()
+    if rollback_link is not None and rollback_link == current_link:
+        raise InstallError("current and rollback release pointers must differ")
+
+    previous_target = _linked_release_target(current_link, release_root)
+    if (
+        rollback_link is not None
+        and not current_link.is_symlink()
+        and (rollback_link.exists() or rollback_link.is_symlink())
+    ):
+        raise InstallError("administrator rollback pointer exists without an active release")
 
     final = release_root / digest
+    if final.is_symlink() or (final.exists() and not final.is_dir()):
+        raise InstallError(f"existing administrator release is unsafe: {final}")
     if final.exists():
-        if not final.is_dir() or not _same_release(extracted, final, expected_uid):
+        if not _same_release(extracted, final, expected_uid):
             raise InstallError(f"existing administrator release is unsafe: {final}")
         shutil.rmtree(extracted)
     else:
         os.chmod(extracted, 0o755)
         os.replace(extracted, final)
 
-    if current_link.exists() and not current_link.is_symlink():
-        raise InstallError(f"administrator release pointer is not a symlink: {current_link}")
-    temporary_link = current_link.with_name(f".{current_link.name}.{os.getpid()}")
+    if rollback_link is not None and previous_target is not None:
+        _replace_release_link(rollback_link, previous_target)
+
+    _replace_release_link(current_link, final)
+    if rollback_link is not None:
+        cleanup_old_releases(
+            release_root,
+            current_link,
+            rollback_link,
+            retention=retention,
+        )
+    return final
+
+
+def _linked_release_target(link: Path, release_root: Path) -> Path | None:
+    if not link.is_symlink():
+        if link.exists():
+            raise InstallError(f"administrator release pointer is not a symlink: {link}")
+        return None
     try:
-        os.symlink(final, temporary_link)
-        os.replace(temporary_link, current_link)
+        target = link.resolve(strict=True)
+    except OSError as error:
+        raise InstallError(f"administrator release pointer is broken: {link}") from error
+    if target.parent != release_root or not RELEASE_DIGEST.fullmatch(target.name):
+        raise InstallError(f"administrator release pointer targets an unsafe path: {link}")
+    if not target.is_dir() or target.is_symlink():
+        raise InstallError(f"administrator release pointer target is not a directory: {link}")
+    return target
+
+
+def _replace_release_link(link: Path, target: Path) -> None:
+    if link.exists() and not link.is_symlink():
+        raise InstallError(f"administrator release pointer is not a symlink: {link}")
+    temporary_link = link.with_name(f".{link.name}.{os.getpid()}")
+    try:
+        temporary_link.unlink(missing_ok=True)
+        os.symlink(target, temporary_link)
+        os.replace(temporary_link, link)
     finally:
         temporary_link.unlink(missing_ok=True)
-    return final
+
+
+def cleanup_old_releases(
+    release_root: Path,
+    current_link: Path,
+    rollback_link: Path,
+    *,
+    retention: int = RELEASE_RETENTION,
+) -> None:
+    """Remove unreferenced digest releases beyond the retention count."""
+
+    if retention < 2:
+        raise InstallError("release retention must preserve active and rollback releases")
+    release_root = release_root.resolve()
+    current = _linked_release_target(current_link, release_root)
+    rollback = _linked_release_target(rollback_link, release_root)
+    if current is None:
+        raise InstallError("cannot clean releases without an active release")
+
+    candidates = []
+    for candidate in release_root.iterdir():
+        if (
+            candidate.parent == release_root
+            and RELEASE_DIGEST.fullmatch(candidate.name)
+            and candidate.is_dir()
+            and not candidate.is_symlink()
+        ):
+            candidates.append(candidate)
+    candidates.sort(
+        key=lambda candidate: (candidate.stat().st_mtime_ns, candidate.name),
+        reverse=True,
+    )
+
+    protected = {current}
+    if rollback is not None:
+        protected.add(rollback)
+    keep = set(protected)
+    for candidate in candidates:
+        if len(keep) >= retention:
+            break
+        keep.add(candidate)
+    for candidate in candidates:
+        if candidate not in keep:
+            shutil.rmtree(candidate)
 
 
 def install_authenticated_release(bundle: Path, signature: Path) -> Path:
@@ -306,7 +405,13 @@ def install_authenticated_release(bundle: Path, signature: Path) -> Path:
             bundle, signature, TRUSTED_KEY, work_root
         )
         extract_authenticated_bundle(staged_bundle, extracted)
-        return activate_extracted_release(extracted, digest, RELEASE_ROOT, CURRENT_LINK)
+        return activate_extracted_release(
+            extracted,
+            digest,
+            RELEASE_ROOT,
+            CURRENT_LINK,
+            rollback_link=ROLLBACK_LINK,
+        )
     finally:
         shutil.rmtree(work_root, ignore_errors=True)
 

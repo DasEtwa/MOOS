@@ -160,6 +160,21 @@ def main() -> int:
         releases = temporary / "releases"
         releases.mkdir()
         current = temporary / "current"
+        invalid_digest_extract = temporary / "extracted-invalid-digest"
+        invalid_digest_extract.mkdir()
+        extract_authenticated_bundle(authenticated, invalid_digest_extract)
+        try:
+            activate_extracted_release(
+                invalid_digest_extract,
+                "../outside",
+                releases,
+                current,
+                expected_uid=os.getuid(),
+            )
+        except InstallError as error:
+            assert "digest is invalid" in str(error)
+        else:
+            raise AssertionError("release activation accepted an unsafe digest")
         final = activate_extracted_release(
             extracted,
             "a" * 64,
@@ -179,6 +194,46 @@ def main() -> int:
             current,
             expected_uid=os.getuid(),
         ) == final
+
+        symlinked_target = releases / ("b" * 64)
+        symlinked_target.symlink_to(final)
+        symlinked_extract = temporary / "extracted-symlink"
+        symlinked_extract.mkdir()
+        extract_authenticated_bundle(authenticated, symlinked_extract)
+        try:
+            activate_extracted_release(
+                symlinked_extract,
+                "b" * 64,
+                releases,
+                current,
+                expected_uid=os.getuid(),
+            )
+        except InstallError as error:
+            assert "unsafe" in str(error)
+        else:
+            raise AssertionError("release activation followed a digest symlink")
+        symlinked_target.unlink()
+
+        rollback = temporary / "rollback"
+        for digest in ("b" * 64, "c" * 64, "d" * 64):
+            next_extracted = temporary / f"extracted-{digest[0]}"
+            next_extracted.mkdir()
+            extract_authenticated_bundle(authenticated, next_extracted)
+            final = activate_extracted_release(
+                next_extracted,
+                digest,
+                releases,
+                current,
+                expected_uid=os.getuid(),
+                rollback_link=rollback,
+            )
+
+        assert current.resolve() == final
+        assert rollback.resolve() == releases / ("c" * 64)
+        assert (releases / ("c" * 64)).is_dir()
+        assert (releases / ("d" * 64)).is_dir()
+        assert not (releases / ("a" * 64)).exists()
+        assert not (releases / ("b" * 64)).exists()
 
         tampered = temporary / "tampered.tar"
         tampered.write_bytes(

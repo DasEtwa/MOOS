@@ -28,6 +28,8 @@ STATE_ROOT='/var/lib/moos-gateway'
 CONFIG_ROOT='/etc/moos'
 UNIT_ROOT='/etc/systemd/system'
 DOC_ROOT='/usr/share/doc/moos'
+INSTALL_LOCK='/run/moos/gateway-install.lock'
+INSTALL_LOCK_TIMEOUT=30
 LISTEN_ADDRESS=''
 PORT='7411'
 BINARY_ROOT=''
@@ -142,9 +144,22 @@ case "$SOURCE_ROOT" in
     /usr/lib/moos/admin-releases/*) ;;
     *) fail "privileged source is not an authenticated administrator release: $SOURCE_ROOT" ;;
 esac
-for command_name in awk chmod chown dd getent groupadd install mktemp mv passwd rm sha256sum stat systemctl systemd-run tr useradd; do
+for command_name in awk chmod chown dd flock getent groupadd install mktemp mv passwd rm sha256sum stat systemctl systemd-run tr useradd; do
     command -v "$command_name" >/dev/null 2>&1 || fail "required host command is missing: $command_name"
 done
+[ -d /run/moos ] && [ ! -L /run/moos ] || fail 'trusted control-plane runtime directory is missing'
+[ "$(stat -c %u:%g:%a /run/moos)" = '0:0:711' ] || \
+    fail 'trusted control-plane runtime directory has unsafe ownership or mode'
+if [ -e "$INSTALL_LOCK" ] || [ -L "$INSTALL_LOCK" ]; then
+    [ -f "$INSTALL_LOCK" ] && [ ! -L "$INSTALL_LOCK" ] && \
+    [ "$(stat -c %u:%g:%a:%h "$INSTALL_LOCK")" = '0:0:600:1' ] || \
+        fail 'Gateway installer lock has unsafe ownership, mode, or link count'
+fi
+exec 9>>"$INSTALL_LOCK"
+chown root:root "$INSTALL_LOCK"
+chmod 0600 "$INSTALL_LOCK"
+flock -w "$INSTALL_LOCK_TIMEOUT" 9 || \
+    fail "another Gateway setup is active (lock timeout after ${INSTALL_LOCK_TIMEOUT}s)"
 getent group "$CONTROL_GROUP" >/dev/null 2>&1 || \
     fail 'moos-control is missing; install the local control plane first'
 [ "$(sha256sum "$SOURCE_ROOT/systemd/moos-gateway.service" | awk '{print $1}')" = \

@@ -6,6 +6,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -34,6 +35,35 @@ def run(command, *arguments, expected=0):
 def require(needle, value, description):
     if needle not in value:
         raise AssertionError(f"missing {description}: {needle!r}")
+
+
+def check_flock_serializes_concurrent_invocations():
+    flock = shutil.which("flock")
+    if flock is None:
+        raise AssertionError("flock is required for the installer lock test")
+    with tempfile.TemporaryDirectory() as temporary:
+        lock = Path(temporary) / "gateway-install.lock"
+        holder = subprocess.Popen(
+            [flock, "-n", str(lock), "sleep", "1"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            deadline = time.monotonic() + 1
+            while time.monotonic() < deadline and not lock.exists():
+                time.sleep(0.01)
+            if holder.poll() is not None:
+                raise AssertionError("lock holder exited before acquiring the lock")
+            contender = subprocess.run(
+                [flock, "-w", "0.1", str(lock), "true"],
+                capture_output=True,
+                check=False,
+            )
+            if contender.returncode == 0:
+                raise AssertionError("concurrent flock invocation was not serialized")
+        finally:
+            holder.terminate()
+            holder.wait(timeout=2)
 
 
 def main():
@@ -148,6 +178,19 @@ def main():
     setup = SETUP.read_text(encoding="utf-8")
     if "cargo build" in setup or "python3" in setup:
         raise AssertionError("root installer builds code or retains a Python runtime path")
+    require("INSTALL_LOCK='/run/moos/gateway-install.lock'", setup, "global installer lock path")
+    require("flock -w \"$INSTALL_LOCK_TIMEOUT\" 9", setup, "bounded global installer lock")
+    lock_position = setup.index("flock -w \"$INSTALL_LOCK_TIMEOUT\" 9")
+    mutation_position = setup.index("useradd --system")
+    if lock_position > mutation_position:
+        raise AssertionError("Gateway installer acquires its lock after mutating account state")
+    for lock_policy in (
+        "trusted control-plane runtime directory has unsafe ownership or mode",
+        "Gateway installer lock has unsafe ownership, mode, or link count",
+        "another Gateway setup is active (lock timeout",
+    ):
+        require(lock_policy, setup, "safe concurrent installer policy")
+    check_flock_serializes_concurrent_invocations()
     require(
         "existing gateway device store has unsafe ownership or mode",
         setup,
@@ -186,6 +229,7 @@ def main():
     print("MOOS Rust Gateway integration test: PASS")
     print("  matching release artifacts and strict installer validation: ok")
     print("  Tailscale-only systemd sandbox and socket binding: ok")
+    print("  global installer lock serializes concurrent invocations: ok")
     print("  installer consumes prebuilt binaries and has rollback path: ok")
     return 0
 

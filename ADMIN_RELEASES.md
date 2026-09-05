@@ -14,10 +14,10 @@ externally provisioned root-owned helper + root-owned public key
                  signature over the exact copied bundle
                               ↓
              authenticated archive parsing and allowlisted extraction
-                              ↓
+                             ↓
              root-owned /usr/lib/moos/admin-releases/<sha256>
-                              ↓
-                 atomic /usr/lib/moos/admin-current pointer
+                             ↓
+             atomic admin-current + admin-rollback pointers
 ~~~
 
 The trust anchor consists of both:
@@ -76,8 +76,11 @@ manifest, import Python from it, or execute any contained file before that
 verification succeeds.
 
 After authentication, extraction uses an exact path allowlist, accepts regular
-files only, applies fixed modes, and atomically switches `admin-current`. Root
-operations then use only that authenticated release:
+files only, applies fixed modes, and atomically switches `admin-current` while
+preserving the previous release in `admin-rollback`. Only the active release
+and that rollback target are retained; older digest directories are removed
+after the pointer switch. Root operations then use only that authenticated
+release:
 
 ~~~bash
 ADMIN_ROOT=/usr/lib/moos/admin-current
