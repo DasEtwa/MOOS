@@ -58,7 +58,6 @@ def main() -> None:
         "RemoteMetadataCache.swift",
         "HostConfigurationStore.swift",
         "DeviceCredentialStore.swift",
-        "LiveMOOSStateProviding.swift",
         "LiveMOOSStateService.swift",
         "MOOSProtocolV1.swift",
         "MOOSGatewayV1.swift",
@@ -81,7 +80,7 @@ def main() -> None:
     assert "longpressgesture" in combined_sources
     assert ".contextmenu" in combined_sources
     assert "timelineview" in combined_sources
-    assert "mock controls" in combined_sources
+    assert "protocol v1 controls" in combined_sources
     assert "asyncstream" in combined_sources
     assert "contenthash" in combined_sources
     assert "options: .atomic" in combined_sources
@@ -112,7 +111,9 @@ def main() -> None:
     assert "case .active:" in home_view
     assert "applicationDidEnterBackground" in production_service
     assert "applicationDidBecomeActive" in production_service
-    assert "snapshot = .reconnecting" in production_service
+    assert "state: .reconnecting" in production_service
+    assert "metadataCache" in production_service
+    assert "HomeSnapshotComposer.compose" in production_service
     assert 'Text(verbatim: "\\(address):\\(port)")' in home_view
     assert "ConnectionInfoView" in home_view
     assert 'accessibilityLabel("Host actions")' in home_view

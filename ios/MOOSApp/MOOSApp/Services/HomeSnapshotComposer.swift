@@ -3,7 +3,10 @@ enum HomeSnapshotComposer {
         metadata: CachedRemoteMetadata,
         liveState: LiveMOOSState,
         preferences: LocalShellPreferences = .defaultValue,
-        isShowingCachedMetadata: Bool
+        isShowingCachedMetadata: Bool,
+        host: Host? = nil,
+        personalSystem: PersonalSystem? = nil,
+        failureMessage: String? = nil
     ) -> HomeSnapshot {
         let widgets = metadata.widgets.map { metadata in
             let liveValue = liveState.widgets[metadata.id]
@@ -16,14 +19,12 @@ enum HomeSnapshotComposer {
         }
 
         return HomeSnapshot(
-            host: metadata.host,
-            personalSystems: [
-                PersonalSystem(
-                    id: metadata.personalSystemID,
-                    displayName: metadata.personalSystemName,
-                    state: liveState.personalSystemState
-                )
-            ],
+            host: host ?? metadata.host,
+            personalSystems: [personalSystem ?? PersonalSystem(
+                id: metadata.personalSystemID,
+                displayName: metadata.personalSystemName,
+                state: liveState.personalSystemState
+            )],
             connectionState: liveState.connectionState,
             widgets: widgets,
             applications: arrange(
@@ -35,7 +36,7 @@ enum HomeSnapshotComposer {
             uptime: liveState.uptime,
             lastSynchronizedAt: liveState.synchronizedAt,
             isShowingCachedMetadata: isShowingCachedMetadata,
-            failureMessage: nil
+            failureMessage: failureMessage
         )
     }
 

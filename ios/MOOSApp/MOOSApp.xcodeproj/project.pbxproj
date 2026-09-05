@@ -33,7 +33,6 @@
 		B10000000000000000000018 /* LocalShellPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000018 /* LocalShellPreferences.swift */; };
 		B10000000000000000000019 /* RemoteMetadataCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000019 /* RemoteMetadataCache.swift */; };
 		B1000000000000000000001A /* HomeSnapshotComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000000000000000000001A /* HomeSnapshotComposer.swift */; };
-		B1000000000000000000001B /* LiveMOOSStateProviding.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000000000000000000001B /* LiveMOOSStateProviding.swift */; };
 		B1000000000000000000001C /* ConnectionBannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000000000000000000001C /* ConnectionBannerView.swift */; };
 		B1000000000000000000001D /* MOOSProtocolV1.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000000000000000000001D /* MOOSProtocolV1.swift */; };
 		B1000000000000000000001E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C1000000000000000000001E /* Assets.xcassets */; };
@@ -84,7 +83,6 @@
 		C10000000000000000000018 /* LocalShellPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalShellPreferences.swift; sourceTree = "<group>"; };
 		C10000000000000000000019 /* RemoteMetadataCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteMetadataCache.swift; sourceTree = "<group>"; };
 		C1000000000000000000001A /* HomeSnapshotComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeSnapshotComposer.swift; sourceTree = "<group>"; };
-		C1000000000000000000001B /* LiveMOOSStateProviding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveMOOSStateProviding.swift; sourceTree = "<group>"; };
 		C1000000000000000000001C /* ConnectionBannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionBannerView.swift; sourceTree = "<group>"; };
 		C1000000000000000000001D /* MOOSProtocolV1.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MOOSProtocolV1.swift; sourceTree = "<group>"; };
 		C1000000000000000000001E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -166,7 +164,6 @@
 			children = (
 				C1000000000000000000001A /* HomeSnapshotComposer.swift */,
 				C10000000000000000000021 /* LiveMOOSStateService.swift */,
-				C1000000000000000000001B /* LiveMOOSStateProviding.swift */,
 				C10000000000000000000008 /* MOOSStateProviding.swift */,
 				C10000000000000000000009 /* MockMOOSStateService.swift */,
 				C10000000000000000000020 /* NWMOOSTransport.swift */,
@@ -427,7 +424,6 @@
 				B10000000000000000000018 /* LocalShellPreferences.swift in Sources */,
 				B10000000000000000000019 /* RemoteMetadataCache.swift in Sources */,
 				B1000000000000000000001A /* HomeSnapshotComposer.swift in Sources */,
-				B1000000000000000000001B /* LiveMOOSStateProviding.swift in Sources */,
 				B1000000000000000000001C /* ConnectionBannerView.swift in Sources */,
 				B1000000000000000000001D /* MOOSProtocolV1.swift in Sources */,
 				B1000000000000000000001F /* HostConfigurationStore.swift in Sources */,

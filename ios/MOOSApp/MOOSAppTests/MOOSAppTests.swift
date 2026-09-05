@@ -71,6 +71,32 @@ final class MOOSAppTests: XCTestCase {
         XCTAssertEqual(metadata.applications.first?.icon.contentHash, "mock-icon-blender-v1")
     }
 
+    func testRemoteMetadataCacheRejectsOversizedFilesBeforeDecoding() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let fileURL = directory.appendingPathComponent("metadata.json")
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        try Data(
+            repeating: 0,
+            count: DiskRemoteMetadataCache.maximumFileSizeBytes + 1
+        ).write(to: fileURL)
+
+        let cache = DiskRemoteMetadataCache(fileURL: fileURL)
+        XCTAssertThrowsError(try cache.load()) { error in
+            guard case let .fileTooLarge(actualBytes, maximumBytes) =
+                error as? DiskRemoteMetadataCacheError else {
+                return XCTFail("unexpected cache error: \(error)")
+            }
+            XCTAssertGreaterThan(actualBytes, maximumBytes)
+            XCTAssertEqual(maximumBytes, DiskRemoteMetadataCache.maximumFileSizeBytes)
+        }
+    }
+
     func testLocalPreferencesRoundTrip() throws {
         let suiteName = "dev.moos.shell.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -125,6 +151,22 @@ final class MOOSAppTests: XCTestCase {
         XCTAssertTrue(snapshot.widgets.isEmpty)
         XCTAssertTrue(snapshot.applications.isEmpty)
         XCTAssertEqual(connector.connectionAttempts, 0)
+    }
+
+    func testStateStreamMulticastsTheCurrentSnapshotToEachSubscriber() async {
+        let service = LiveMOOSStateService(
+            store: FailingHostConfigurationStore(),
+            credentialStore: InMemoryDeviceCredentialStore(),
+            connector: TestConnector(result: .failure(.unreachable))
+        )
+
+        var firstIterator = service.snapshots().makeAsyncIterator()
+        var secondIterator = service.snapshots().makeAsyncIterator()
+        let first = await firstIterator.next()
+        let second = await secondIterator.next()
+
+        XCTAssertEqual(first, .noHost)
+        XCTAssertEqual(second, first)
     }
 
     func testHostConfigurationPersistsAcrossStoreInstances() throws {
@@ -315,6 +357,60 @@ final class MOOSAppTests: XCTestCase {
         XCTAssertTrue(String(decoding: sentFrames[1], as: UTF8.self).contains(
             "\"operation\":\"status\""
         ))
+    }
+
+    func testProductionStateServiceConnectsCachedShellMetadata() async throws {
+        let defaults = try temporaryDefaults()
+        let configuration = try HostConfiguration(
+            address: "100.64.0.10",
+            port: 7411,
+            deviceID: Self.deviceID,
+            displayName: "Garden Host"
+        )
+        let store = UserDefaultsHostConfigurationStore(defaults: defaults)
+        try store.save(configuration)
+        let credentials = InMemoryDeviceCredentialStore()
+        try credentials.saveKey(Self.deviceKey, deviceID: Self.deviceID)
+        let mockMetadata = MockMOOSStateService.metadata(
+            updatedAt: Date(timeIntervalSince1970: 1_000)
+        )
+        let metadata = CachedRemoteMetadata(
+            host: configuration.host,
+            personalSystemID: mockMetadata.personalSystemID,
+            personalSystemName: mockMetadata.personalSystemName,
+            applications: mockMetadata.applications,
+            widgets: mockMetadata.widgets,
+            updatedAt: mockMetadata.updatedAt
+        )
+        let service = LiveMOOSStateService(
+            store: store,
+            credentialStore: credentials,
+            connector: TestConnector(result: .success(TestConnection(frames: [
+                .success(Self.gatewayChallenge),
+                .success(Self.gatewayAuthenticated),
+                .success(Self.validStatusResponse),
+            ]))),
+            metadataCache: StaticRemoteMetadataCache(metadata: metadata),
+            preferencesStore: UserDefaultsLocalPreferencesStore(
+                defaults: defaults,
+                key: "moos.shell.preferences.test"
+            ),
+            pollIntervalNanoseconds: 60_000_000_000,
+            gatewayClientNonce: Data(repeating: 4, count: 32)
+        )
+
+        let snapshot = await firstSnapshot(from: service) {
+            $0.connectionState == .connected
+        }
+
+        XCTAssertTrue(snapshot.hasShellContent)
+        XCTAssertEqual(snapshot.applications.map(\.id), [
+            "blender", "discord", "terminal", "files", "settings",
+        ])
+        XCTAssertEqual(snapshot.widgets.count, 6)
+        XCTAssertEqual(snapshot.host?.displayName, "Garden Host")
+        XCTAssertEqual(snapshot.personalSystems.first?.displayName, "Personal MOOS")
+        XCTAssertFalse(snapshot.isShowingCachedMetadata)
     }
 
     func testPersistedInstanceNameMapsOntoRealStatus() async throws {
@@ -725,6 +821,16 @@ final class MOOSAppTests: XCTestCase {
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
     }
+}
+
+private struct StaticRemoteMetadataCache: RemoteMetadataCaching {
+    let metadata: CachedRemoteMetadata?
+
+    func load() throws -> CachedRemoteMetadata? {
+        metadata
+    }
+
+    func save(_ metadata: CachedRemoteMetadata) throws {}
 }
 
 private enum TestConnectionError: Error, LocalizedError {

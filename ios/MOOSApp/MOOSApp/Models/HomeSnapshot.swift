@@ -13,6 +13,10 @@ struct HomeSnapshot: Equatable, Sendable {
     let isShowingCachedMetadata: Bool
     let failureMessage: String?
 
+    var hasShellContent: Bool {
+        !widgets.isEmpty || !applications.isEmpty || !sessions.isEmpty
+    }
+
     static let noHost = HomeSnapshot(
         host: nil,
         personalSystems: [],

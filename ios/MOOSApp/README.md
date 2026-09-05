@@ -32,7 +32,10 @@ TCP connection, completes the MOOS Gateway v1 HMAC challenge, and then sends the
 bounded Protocol v1 `status` request. Both client and Gateway prove possession
 of the paired key over fresh nonces. The UI becomes Connected only after the
 mutual authentication and strictly validated Protocol-v1 response, then renders
-the returned Personal runtime state.
+the returned Personal runtime state. When a matching remote-metadata cache is
+present, the same production snapshot also renders the widget/app shell,
+system bar, radial navigation, and local settings; cached metadata never
+overrides the live Host or Personal-system identity.
 Preview and test fixtures remain in `MockMOOSStateService`; production does not
 instantiate that service or fall back to its data.
 
@@ -62,10 +65,12 @@ states. Retry, Edit Host, and Remove Host remain available after failure.
   and synchronized uptime. Services publish snapshots with `AsyncStream` rather
   than requiring view polling.
 
-Legacy shell previews may still use mock widgets, apps, sessions, latency, and
-uptime, but none of those values appear in the normal app experience. QR
-pairing, biometric gating, terminal streaming, application streaming, and
-lifecycle controls remain outside this slice.
+The current Protocol v1 status operation does not yet provide widget values,
+application sessions, terminal streaming, application streaming, or lifecycle
+controls. Those views remain explicit navigation surfaces: cached metadata is
+shown only for the matching configured Host, while unavailable remote actions
+explain the protocol boundary. QR pairing and biometric gating also remain
+outside this slice.
 
 ## Build verification
 

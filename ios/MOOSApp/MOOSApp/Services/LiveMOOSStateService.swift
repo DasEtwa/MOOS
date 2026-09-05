@@ -5,10 +5,14 @@ actor LiveMOOSStateService: MOOSStateProviding {
     private let credentialStore: any DeviceCredentialStoring
     private let instanceNameStore: any InstanceNameStoring
     private let connector: any MOOSConnectionConnecting
+    private let metadataCache: any RemoteMetadataCaching
+    private let preferencesStore: any LocalPreferencesStoring
     private let pollIntervalNanoseconds: UInt64
     private let gatewayClientNonce: Data?
     private var snapshot: HomeSnapshot
-    private var continuation: AsyncStream<HomeSnapshot>.Continuation?
+    private var cachedMetadata: CachedRemoteMetadata?
+    private var continuations: [UInt64: AsyncStream<HomeSnapshot>.Continuation] = [:]
+    private var nextSubscriberID: UInt64 = 0
     private var connection: (any MOOSConnection)?
     private var monitorTask: Task<Void, Never>?
     private var generation = 0
@@ -20,6 +24,8 @@ actor LiveMOOSStateService: MOOSStateProviding {
         credentialStore: any DeviceCredentialStoring,
         instanceNameStore: any InstanceNameStoring = UserDefaultsInstanceNameStore(),
         connector: any MOOSConnectionConnecting,
+        metadataCache: any RemoteMetadataCaching = EmptyRemoteMetadataCache(),
+        preferencesStore: any LocalPreferencesStoring = UserDefaultsLocalPreferencesStore(),
         pollIntervalNanoseconds: UInt64 = 5_000_000_000,
         gatewayClientNonce: Data? = nil
     ) {
@@ -27,8 +33,11 @@ actor LiveMOOSStateService: MOOSStateProviding {
         self.credentialStore = credentialStore
         self.instanceNameStore = instanceNameStore
         self.connector = connector
+        self.metadataCache = metadataCache
+        self.preferencesStore = preferencesStore
         self.pollIntervalNanoseconds = pollIntervalNanoseconds
         self.gatewayClientNonce = gatewayClientNonce
+        self.cachedMetadata = nil
         if let configuredHost = try? store.load() {
             snapshot = .connecting(to: configuredHost)
         } else {
@@ -37,7 +46,7 @@ actor LiveMOOSStateService: MOOSStateProviding {
     }
 
     nonisolated func snapshots() -> AsyncStream<HomeSnapshot> {
-        AsyncStream { continuation in
+        AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             Task {
                 await self.attach(continuation)
             }
@@ -122,6 +131,7 @@ actor LiveMOOSStateService: MOOSStateProviding {
             await connection.close()
         }
         connection = nil
+        cachedMetadata = nil
         do {
             if let deviceID = snapshot.host?.deviceID {
                 try credentialStore.removeKey(deviceID: deviceID)
@@ -198,9 +208,10 @@ actor LiveMOOSStateService: MOOSStateProviding {
         let activeConnection = connection
         connection = nil
         if let configuration = configuration(from: snapshot.host) {
-            snapshot = .reconnecting(
-                to: configuration,
-                personalSystems: snapshot.personalSystems
+            snapshot = snapshotFor(
+                configuration: configuration,
+                state: .reconnecting,
+                personalSystem: snapshot.personalSystems.first
             )
             emit()
         }
@@ -221,8 +232,14 @@ actor LiveMOOSStateService: MOOSStateProviding {
     }
 
     private func attach(_ continuation: AsyncStream<HomeSnapshot>.Continuation) {
-        self.continuation?.finish()
-        self.continuation = continuation
+        nextSubscriberID &+= 1
+        let subscriberID = nextSubscriberID
+        continuation.onTermination = { [weak self] _ in
+            Task { [weak self] in
+                await self?.detach(subscriberID: subscriberID)
+            }
+        }
+        continuations[subscriberID] = continuation
         continuation.yield(snapshot)
         guard isApplicationActive,
               !hasStarted,
@@ -233,6 +250,10 @@ actor LiveMOOSStateService: MOOSStateProviding {
         Task {
             await self.beginConnection(to: configuration)
         }
+    }
+
+    private func detach(subscriberID: UInt64) {
+        continuations.removeValue(forKey: subscriberID)
     }
 
     private func beginConnection(to configuration: HostConfiguration) async {
@@ -248,7 +269,12 @@ actor LiveMOOSStateService: MOOSStateProviding {
             await connection.close()
         }
         connection = nil
-        snapshot = .connecting(to: configuration)
+        cachedMetadata = loadCachedMetadata(for: configuration)
+        snapshot = snapshotFor(
+            configuration: configuration,
+            state: .connecting,
+            personalSystem: snapshot.personalSystems.first
+        )
         emit()
 
         var pendingConnection: (any MOOSConnection)?
@@ -275,10 +301,16 @@ actor LiveMOOSStateService: MOOSStateProviding {
                 await client.close()
                 return
             }
+            let personalSystem = displayed(
+                response.personalSystem,
+                for: configuration
+            )
             self.connection = connection
-            snapshot = .connected(
-                to: configuration,
-                personalSystems: [displayed(response.personalSystem, for: configuration)]
+            snapshot = snapshotFor(
+                configuration: configuration,
+                state: .connected,
+                personalSystem: personalSystem,
+                synchronizedAt: .now
             )
             emit()
             monitorTask = Task {
@@ -291,9 +323,11 @@ actor LiveMOOSStateService: MOOSStateProviding {
             guard attempt == generation else {
                 return
             }
-            snapshot = .disconnected(
-                from: configuration,
-                message: Self.userFacingMessage(for: error)
+            snapshot = snapshotFor(
+                configuration: configuration,
+                state: .disconnected,
+                personalSystem: snapshot.personalSystems.first,
+                failureMessage: Self.userFacingMessage(for: error)
             )
             emit()
         }
@@ -311,9 +345,14 @@ actor LiveMOOSStateService: MOOSStateProviding {
                     return
                 }
                 let response = try await client.status()
-                snapshot = .connected(
-                    to: configuration,
-                    personalSystems: [displayed(response.personalSystem, for: configuration)]
+                snapshot = snapshotFor(
+                    configuration: configuration,
+                    state: .connected,
+                    personalSystem: displayed(
+                        response.personalSystem,
+                        for: configuration
+                    ),
+                    synchronizedAt: .now
                 )
                 emit()
             } catch is CancellationError {
@@ -324,10 +363,11 @@ actor LiveMOOSStateService: MOOSStateProviding {
                 }
                 await client.close()
                 connection = nil
-                snapshot = .disconnected(
-                    from: configuration,
-                    personalSystems: snapshot.personalSystems,
-                    message: Self.userFacingMessage(for: error)
+                snapshot = snapshotFor(
+                    configuration: configuration,
+                    state: .disconnected,
+                    personalSystem: snapshot.personalSystems.first,
+                    failureMessage: Self.userFacingMessage(for: error)
                 )
                 emit()
                 return
@@ -335,8 +375,106 @@ actor LiveMOOSStateService: MOOSStateProviding {
         }
     }
 
+    private func snapshotFor(
+        configuration: HostConfiguration,
+        state: ConnectionState,
+        personalSystem: PersonalSystem? = nil,
+        synchronizedAt: Date? = nil,
+        failureMessage: String? = nil
+    ) -> HomeSnapshot {
+        guard let metadata = cachedMetadata else {
+            switch state {
+            case .noHost:
+                return .noHost
+            case .connected:
+                return .connected(
+                    to: configuration,
+                    personalSystems: personalSystem.map { [$0] } ?? [],
+                    synchronizedAt: synchronizedAt ?? .now
+                )
+            case .connecting:
+                return .connecting(to: configuration)
+            case .reconnecting:
+                return .reconnecting(
+                    to: configuration,
+                    personalSystems: personalSystem.map { [$0] }
+                        ?? snapshot.personalSystems
+                )
+            case .disconnected, .offline:
+                return .disconnected(
+                    from: configuration,
+                    personalSystems: personalSystem.map { [$0] }
+                        ?? snapshot.personalSystems,
+                    message: failureMessage ?? "The MOOS Host is unavailable."
+                )
+            }
+        }
+
+        let displayedSystem = personalSystem
+            ?? snapshot.personalSystems.first
+            ?? PersonalSystem(
+                id: metadata.personalSystemID,
+                displayName: metadata.personalSystemName,
+                state: .unknown
+            )
+        let liveState = LiveMOOSState(
+            connectionState: state,
+            personalSystemState: displayedSystem.state,
+            widgets: [:],
+            sessions: [],
+            latencyMilliseconds: nil,
+            uptime: snapshot.uptime,
+            synchronizedAt: synchronizedAt ?? snapshot.lastSynchronizedAt
+        )
+        return HomeSnapshotComposer.compose(
+            metadata: metadata,
+            liveState: liveState,
+            preferences: currentPreferences(),
+            isShowingCachedMetadata: state != .connected,
+            host: configuration.host,
+            personalSystem: displayedSystem,
+            failureMessage: failureMessage
+        )
+    }
+
+    private func loadCachedMetadata(
+        for configuration: HostConfiguration
+    ) -> CachedRemoteMetadata? {
+        do {
+            guard let metadata = try metadataCache.load() else {
+                return nil
+            }
+            let sameEndpoint = metadata.host.address == configuration.address
+                && metadata.host.port == configuration.port
+            guard metadata.host.id == configuration.host.id || sameEndpoint else {
+                return nil
+            }
+            if let cachedDeviceID = metadata.host.deviceID,
+               cachedDeviceID != configuration.deviceID {
+                return nil
+            }
+            return metadata
+        } catch {
+            return nil
+        }
+    }
+
+    private func currentPreferences() -> LocalShellPreferences {
+        (try? preferencesStore.load()) ?? .defaultValue
+    }
+
     private func emit() {
-        continuation?.yield(snapshot)
+        let subscribers = continuations
+        for (subscriberID, continuation) in subscribers {
+            switch continuation.yield(snapshot) {
+            case .enqueued, .dropped:
+                break
+            case .terminated:
+                continuations.removeValue(forKey: subscriberID)
+            @unknown default:
+                continuations.removeValue(forKey: subscriberID)
+            }
+        }
     }
 
     private func rollbackHostChange(

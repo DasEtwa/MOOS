@@ -4,44 +4,89 @@ import UIKit
 struct MOOSHomeView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel: HomeViewModel
+    @StateObject private var settingsViewModel: SettingsViewModel
+    @State private var navigationPath = NavigationPath()
     @State private var isHostEditorPresented = false
+    @State private var isPowerMenuVisible = false
+    @State private var isRadialMenuVisible = false
+    @State private var notice: ShellNotice?
 
     init(viewModel: @autoclosure @escaping () -> HomeViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel())
+        _settingsViewModel = StateObject(
+            wrappedValue: SettingsViewModel(
+                store: UserDefaultsLocalPreferencesStore()
+            )
+        )
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             ZStack {
                 MOOSTheme.background.ignoresSafeArea()
 
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("MOOS")
-                        .font(.system(size: 30, weight: .black, design: .rounded))
-                        .foregroundStyle(MOOSTheme.accent)
-                        .padding(.horizontal, 24)
-                        .padding(.top, 24)
+                VStack(spacing: 0) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("MOOS")
+                            .font(.system(size: 30, weight: .black, design: .rounded))
+                            .foregroundStyle(MOOSTheme.accent)
+                            .padding(.horizontal, 24)
+                            .padding(.top, 24)
 
-                    switch viewModel.snapshot.connectionState {
-                    case .noHost:
-                        NoHostView(addHost: showHostEditor)
-                    default:
-                        ConfiguredHostView(
-                            snapshot: viewModel.snapshot,
-                            retry: { Task { await viewModel.retry() } },
-                            edit: showHostEditor,
-                            remove: { Task { await viewModel.removeHost() } },
-                            renameHost: { name in
-                                await viewModel.renameHost(to: name)
-                            },
-                            renamePersonalSystem: { id, name in
-                                await viewModel.renamePersonalSystem(id: id, to: name)
-                            }
+                        switch viewModel.snapshot.connectionState {
+                        case .noHost:
+                            NoHostView(addHost: showHostEditor)
+                        default:
+                            ConfiguredHostView(
+                                snapshot: viewModel.snapshot,
+                                retry: { Task { await viewModel.retry() } },
+                                edit: showHostEditor,
+                                remove: { Task { await viewModel.removeHost() } },
+                                renameHost: { name in
+                                    await viewModel.renameHost(to: name)
+                                },
+                                renamePersonalSystem: { id, name in
+                                    await viewModel.renamePersonalSystem(id: id, to: name)
+                                }
+                            )
+                        }
+                    }
+
+                    if viewModel.snapshot.host != nil {
+                        SystemBarView(
+                            connectionState: viewModel.snapshot.connectionState,
+                            latencyMilliseconds: viewModel.snapshot.latencyMilliseconds,
+                            sessions: viewModel.snapshot.sessions,
+                            onMOOSTap: showPowerMenu,
+                            onMOOSLongPress: showRadialMenu,
+                            onSessionAction: handleSessionAction
                         )
                     }
                 }
+
+                if isPowerMenuVisible {
+                    PowerMenuView(
+                        onSelect: handlePowerAction,
+                        onDismiss: hideOverlays
+                    )
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    .zIndex(1)
+                }
+
+                if isRadialMenuVisible {
+                    RadialMenuView(
+                        items: .shellDefaults,
+                        onSelect: handleRadialSelection,
+                        onDismiss: hideOverlays
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                    .zIndex(2)
+                }
             }
             .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(for: ShellDestination.self) { destination in
+                destinationView(for: destination)
+            }
         }
         .preferredColorScheme(.dark)
         .task {
@@ -64,12 +109,125 @@ struct MOOSHomeView: View {
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
         }
+        .alert(item: $notice) { notice in
+            Alert(
+                title: Text(notice.title),
+                message: Text(notice.message),
+                dismissButton: .default(Text("OK"))
+            )
+        }
     }
 
     private func showHostEditor() {
         viewModel.prepareHostEditor()
         isHostEditorPresented = true
     }
+
+    private func showPowerMenu() {
+        withAnimation(.easeOut(duration: 0.18)) {
+            isRadialMenuVisible = false
+            isPowerMenuVisible = true
+        }
+    }
+
+    private func showRadialMenu() {
+        withAnimation(.easeOut(duration: 0.2)) {
+            isPowerMenuVisible = false
+            isRadialMenuVisible = true
+        }
+    }
+
+    private func hideOverlays() {
+        withAnimation(.easeOut(duration: 0.16)) {
+            isPowerMenuVisible = false
+            isRadialMenuVisible = false
+        }
+    }
+
+    private func handlePowerAction(_ action: PowerMenuAction) {
+        hideOverlays()
+        notice = ShellNotice(
+            id: "power-\(action.id)",
+            title: "\(action.title) unavailable",
+            message: "Protocol v1 does not expose system power controls."
+        )
+    }
+
+    private func handleRadialSelection(_ item: RadialMenuItem) {
+        hideOverlays()
+        navigationPath.append(item.destination)
+    }
+
+    private func handleSessionAction(
+        _ session: AppSession,
+        _ action: RunningAppAction
+    ) {
+        if action == .open,
+           let application = viewModel.snapshot.applications.first(
+               where: { $0.id == session.applicationID }
+           ) {
+            navigationPath.append(application.destination)
+            return
+        }
+
+        notice = ShellNotice(
+            id: "session-\(session.id)-\(action.id)",
+            title: "\(action.title) unavailable",
+            message: "Protocol v1 does not expose session controls yet."
+        )
+    }
+
+    @ViewBuilder
+    private func destinationView(for destination: ShellDestination) -> some View {
+        switch destination {
+        case .blender:
+            ShellPlaceholderView(
+                title: "Blender",
+                symbolName: "cube.transparent",
+                message: "Linux application streaming is not part of Protocol v1."
+            )
+        case .discord:
+            ShellPlaceholderView(
+                title: "Discord",
+                symbolName: "bubble.left.and.bubble.right",
+                message: "This application is represented by remote metadata only."
+            )
+        case .terminal:
+            TerminalPlaceholderView()
+        case .files:
+            ShellPlaceholderView(
+                title: "Files",
+                symbolName: "folder",
+                message: "Remote file access requires an authenticated operation."
+            )
+        case .apps:
+            ShellPlaceholderView(
+                title: "Apps",
+                symbolName: "square.grid.2x2",
+                message: "Installed application metadata comes from the configured host."
+            )
+        case .appStore:
+            ShellPlaceholderView(
+                title: "App Store",
+                symbolName: "shippingbox",
+                message: "Application discovery is not part of Protocol v1."
+            )
+        case .instances:
+            ShellPlaceholderView(
+                title: "Instances",
+                symbolName: "server.rack",
+                message: "Instance management remains at the host status boundary."
+            )
+        case .settings:
+            SettingsView(viewModel: settingsViewModel)
+        }
+    }
+}
+
+private struct ShellNotice: Identifiable {
+    let id: String
+    let title: String
+    let message: String
 }
 
 private struct NoHostView: View {
@@ -126,6 +284,10 @@ private struct ConfiguredHostView: View {
                     instanceList
                 case .noHost:
                     EmptyView()
+                }
+
+                if snapshot.hasShellContent {
+                    shellWorkspace
                 }
             }
             .padding(.horizontal, 24)
@@ -278,6 +440,27 @@ private struct ConfiguredHostView: View {
                 InstanceCard(system: system) { name in
                     await renamePersonalSystem(system.id, name)
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var shellWorkspace: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            if snapshot.isShowingCachedMetadata {
+                ConnectionBannerView(
+                    state: snapshot.connectionState,
+                    lastSynchronizedAt: snapshot.lastSynchronizedAt,
+                    isShowingCachedMetadata: true
+                )
+            }
+
+            if !snapshot.widgets.isEmpty {
+                WidgetGridView(widgets: snapshot.widgets)
+            }
+
+            if !snapshot.applications.isEmpty {
+                AppGridView(applications: snapshot.applications)
             }
         }
     }

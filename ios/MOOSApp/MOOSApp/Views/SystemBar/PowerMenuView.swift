@@ -62,7 +62,7 @@ struct PowerMenuView: View {
                     .foregroundStyle(action == .shutdown ? .red : .white)
                 }
 
-                Text("Mock controls")
+                Text("Protocol v1 controls")
                     .font(.caption2)
                     .foregroundStyle(MOOSTheme.secondaryText)
                     .padding(.horizontal, 12)
