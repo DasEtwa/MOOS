@@ -59,8 +59,18 @@ credential validation; its QEMU test booted and rejected blank-password root
 login. The stable Buildroot tag was independently resolved through GitHub and
 matched the configured commit.
 
-Xcode and the iOS Simulator are unavailable on this Linux host. The added
-XCTest must run in the macOS iOS workflow before merge. No privileged MOOS
-installation was performed: effective post-install properties and staging under
+GitHub Actions verification on 2026-09-05:
+
+- [iOS run 33987524083](https://github.com/DasEtwa/MOOS/actions/runs/33987524083)
+  passed on `d3beab4`: simulator build, all 35 XCTest cases (including stream
+  cancellation/latest-value coverage), and unsigned physical-iPhone IPA build.
+- [Gateway run 33987524056](https://github.com/DasEtwa/MOOS/actions/runs/33987524056)
+  passed on `d3beab4`: Rust checks, release builds and integration tests.
+- [Host run 33989014276](https://github.com/DasEtwa/MOOS/actions/runs/33989014276)
+  passed on `ba447b0`. The initial CI run exposed a launcher test dependency on
+  local QEMU build artifacts; that dry-run test now creates temporary fixtures.
+  Production sources are unchanged from the successful iOS/Gateway runs.
+
+No privileged MOOS installation was performed: effective post-install properties and staging under
 the real service account must also be checked on the deployment host. The
 installers now reject/roll back effective-policy mismatches automatically.
