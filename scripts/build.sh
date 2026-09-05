@@ -10,7 +10,9 @@ HOST_TOOLS_DIR="$MOOS_ROOT/host-tools"
 DEVELOPMENT_CONFIG="$MOOS_ROOT/configs/moos_qemu_x86_64_defconfig"
 RELEASE_CONFIG="$MOOS_ROOT/configs/moos_qemu_x86_64_release_defconfig"
 BUILDROOT_REPO='https://github.com/buildroot/buildroot.git'
-BUILDROOT_REF='9ac19958f25a58df65b991ec1d7fa80b34f19eb0'
+BUILDROOT_RELEASE='2026.05.1'
+BUILDROOT_REF='cb857ba4c87a93e5265a9e4a3f32071abf39e14a'
+BUILDROOT_PATCH_DIR="$MOOS_ROOT/patches/buildroot"
 JOBS=4
 PROFILE='release'
 
@@ -95,6 +97,19 @@ if [ "$current_ref" != "$BUILDROOT_REF" ]; then
     git -C "$BUILDROOT_DIR" fetch --depth=1 origin "$BUILDROOT_REF"
     git -C "$BUILDROOT_DIR" checkout --detach "$BUILDROOT_REF"
 fi
+
+for buildroot_patch in "$BUILDROOT_PATCH_DIR"/*.patch; do
+    [ -f "$buildroot_patch" ] || continue
+    if git -C "$BUILDROOT_DIR" apply --reverse --check "$buildroot_patch" \
+        >/dev/null 2>&1; then
+        continue
+    fi
+    git -C "$BUILDROOT_DIR" apply --check "$buildroot_patch" || {
+        echo "error: Buildroot patch cannot be applied: $buildroot_patch" >&2
+        exit 1
+    }
+    git -C "$BUILDROOT_DIR" apply "$buildroot_patch"
+done
 
 mkdir -p "$HOST_TOOLS_DIR" "$OUTPUT_DIR"
 

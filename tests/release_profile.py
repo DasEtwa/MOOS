@@ -35,6 +35,14 @@ def main() -> int:
     release = RELEASE.read_text(encoding="utf-8")
     build_script = BUILD_SCRIPT.read_text(encoding="utf-8")
     assert "JOBS=4\nPROFILE='release'\n" in build_script
+    assert "BUILDROOT_RELEASE='2026.05.1'" in build_script
+    assert "BUILDROOT_REF='cb857ba4c87a93e5265a9e4a3f32071abf39e14a'" in build_script
+    assert 'BUILDROOT_PATCH_DIR="$MOOS_ROOT/patches/buildroot"' in build_script
+    qemu_patch = (
+        REPO_ROOT / "patches/buildroot/0001-moo-qemu-maintenance-and-host-seccomp.patch"
+    ).read_text(encoding="utf-8")
+    assert "QEMU_VERSION = 11.0.3" in qemu_patch
+    assert "HOST_QEMU_OPTS += --enable-seccomp" in qemu_patch
     assert 'BR2_TARGET_ENABLE_ROOT_LOGIN=y' in development
     assert 'BR2_TARGET_GENERIC_ROOT_PASSWD=""' in development
     assert '# BR2_TARGET_ENABLE_ROOT_LOGIN is not set' in release

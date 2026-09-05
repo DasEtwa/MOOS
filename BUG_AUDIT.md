@@ -254,21 +254,20 @@ runtime.
 Severity: Future Risk
 Component: QEMU hardening
 Category: Host/guest isolation
-Status: Not an active bug
+Status: Resolved for the managed MOOS build
 
 ### Finding
 
-The Buildroot-provided host QEMU binary was checked locally and does not have
-QEMU's optional `-sandbox` seccomp support enabled. The current boundary relies
-on rootless bubblewrap namespaces, TCG, explicit image mounts, and the absence
-of host device bindings.
+The previous Buildroot-provided host QEMU binary was checked locally and did
+not have QEMU's optional `-sandbox` seccomp support enabled. The managed MOOS
+build now applies a tracked Buildroot patch that uses QEMU 11.0.3 and enables
+the host libseccomp dependency on Linux.
 
 ### Significance
 
-A future hardened runtime should evaluate a QEMU build with seccomp support or
-an equivalent external policy. The new Phase 3.1 runtime path adds an external
-systemd/cgroup policy, but this QEMU limitation remains until seccomp or an
-equivalent policy is deliberately evaluated.
+The outer rootless bubblewrap namespace and the Phase 3.1 systemd/cgroup
+policy remain the primary boundaries. QEMU seccomp is defense in depth and is
+checked through the built emulator's `-sandbox` option.
 
 ## MOOS-0011
 

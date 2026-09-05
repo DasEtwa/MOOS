@@ -12,6 +12,7 @@ It is a development image, not a secure general-purpose distribution.
 Verified baseline:
 
 - Linux kernel 6.18.43 LTS
+- QEMU 11.0.3 with host seccomp support on Linux
 - BusyBox 1.38.0
 - root shell on the serial console
 - QEMU boot
@@ -92,9 +93,11 @@ From the repository root:
 ~~~
 
 The optional number selects the parallel job count. The default build is the
-release profile. The build script pins
-Buildroot to commit 9ac19958f25a58df65b991ec1d7fa80b34f19eb0 and applies
-configs/moos_qemu_x86_64_release_defconfig.
+release profile. The build script pins Buildroot to the stable 2026.05.1
+release at commit `cb857ba4c87a93e5265a9e4a3f32071abf39e14a`, applies the
+tracked MOOS Buildroot patch for QEMU 11.0.3 and Linux host seccomp support,
+then applies configs/moos_qemu_x86_64_release_defconfig. The Buildroot source
+checkout is allowed to contain only those documented local patch changes.
 
 For interactive console development and the QEMU login tests, explicitly opt
 into the insecure development profile:

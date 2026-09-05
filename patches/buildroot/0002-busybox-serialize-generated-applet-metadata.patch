@@ -1,0 +1,32 @@
+diff --git a/package/busybox/busybox.mk b/package/busybox/busybox.mk
+index 5b461c3a..65826395 100644
+--- a/package/busybox/busybox.mk
++++ b/package/busybox/busybox.mk
+@@ -127,6 +127,11 @@ BUSYBOX_KCONFIG_FRAGMENT_FILES = $(call qstrip,$(BR2_PACKAGE_BUSYBOX_CONFIG_FRAG
+ BUSYBOX_KCONFIG_EDITORS = menuconfig xconfig gconfig
+ BUSYBOX_KCONFIG_OPTS = $(BUSYBOX_MAKE_OPTS)
+ 
++# BusyBox 1.38.0 regenerates generated applet metadata from a phony target.
++# Serialize the package-local make invocations so parallel Buildroot builds do
++# not race and duplicate every applet entry.
++BUSYBOX_MAKE = $(MAKE1)
++
+ ifeq ($(BR2_PACKAGE_BUSYBOX_INDIVIDUAL_BINARIES),y)
+ define BUSYBOX_PERMISSIONS
+ # Set permissions on all applets with BB_SUID_REQUIRE and BB_SUID_MAYBE.
+@@ -458,13 +463,13 @@ define BUSYBOX_KCONFIG_FIXUP_CMDS
+ endef
+ 
+ define BUSYBOX_BUILD_CMDS
+-	$(BUSYBOX_MAKE_ENV) $(MAKE) $(BUSYBOX_MAKE_OPTS) -C $(@D)
++	$(BUSYBOX_MAKE_ENV) $(BUSYBOX_MAKE) $(BUSYBOX_MAKE_OPTS) -C $(@D)
+ endef
+ 
+ define BUSYBOX_INSTALL_TARGET_CMDS
+ 	# Use the 'noclobber' install rule, to prevent BusyBox from overwriting
+ 	# any full-blown versions of apps installed by other packages.
+-	$(BUSYBOX_MAKE_ENV) $(MAKE) $(BUSYBOX_MAKE_OPTS) -C $(@D) install-noclobber
++	$(BUSYBOX_MAKE_ENV) $(BUSYBOX_MAKE) $(BUSYBOX_MAKE_OPTS) -C $(@D) install-noclobber
+ 	$(BUSYBOX_INSTALL_INDIVIDUAL_BINARIES)
+ 	$(BUSYBOX_INSTALL_INITTAB)
+ 	$(BUSYBOX_INSTALL_UDHCPC_SCRIPT)

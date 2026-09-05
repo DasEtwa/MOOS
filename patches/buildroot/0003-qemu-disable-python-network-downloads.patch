@@ -1,0 +1,10 @@
+diff --git a/package/qemu/qemu.mk b/package/qemu/qemu.mk
+--- a/package/qemu/qemu.mk
++++ b/package/qemu/qemu.mk
+@@ -528,5 +528,6 @@ define HOST_QEMU_CONFIGURE_CMDS
+ 		--enable-slirp \
+ 		--enable-tools \
+ 		--disable-guest-agent \
++		--disable-download \
+ 		$(HOST_QEMU_OPTS)
+ endef
