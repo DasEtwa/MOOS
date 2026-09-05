@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 struct MOOSHomeView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel: HomeViewModel
     @StateObject private var settingsViewModel: SettingsViewModel
@@ -39,6 +40,7 @@ struct MOOSHomeView: View {
                         default:
                             ConfiguredHostView(
                                 snapshot: viewModel.snapshot,
+                                density: settingsViewModel.preferences.layoutDensity,
                                 retry: { Task { await viewModel.retry() } },
                                 edit: showHostEditor,
                                 remove: { Task { await viewModel.removeHost() } },
@@ -118,27 +120,32 @@ struct MOOSHomeView: View {
         }
     }
 
+    private func shellAnimation(duration: Double) -> Animation? {
+        settingsViewModel.preferences.animationsEnabled && !reduceMotion
+            ? .easeOut(duration: duration) : nil
+    }
+
     private func showHostEditor() {
         viewModel.prepareHostEditor()
         isHostEditorPresented = true
     }
 
     private func showPowerMenu() {
-        withAnimation(.easeOut(duration: 0.18)) {
+        withAnimation(shellAnimation(duration: 0.18)) {
             isRadialMenuVisible = false
             isPowerMenuVisible = true
         }
     }
 
     private func showRadialMenu() {
-        withAnimation(.easeOut(duration: 0.2)) {
+        withAnimation(shellAnimation(duration: 0.2)) {
             isPowerMenuVisible = false
             isRadialMenuVisible = true
         }
     }
 
     private func hideOverlays() {
-        withAnimation(.easeOut(duration: 0.16)) {
+        withAnimation(shellAnimation(duration: 0.16)) {
             isPowerMenuVisible = false
             isRadialMenuVisible = false
         }
@@ -253,6 +260,7 @@ private struct NoHostView: View {
 
 private struct ConfiguredHostView: View {
     let snapshot: HomeSnapshot
+    let density: ShellLayoutDensity
     let retry: () -> Void
     let edit: () -> Void
     let remove: () -> Void
@@ -266,7 +274,7 @@ private struct ConfiguredHostView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: density == .compact ? 12 : 22) {
                 hostCard
 
                 switch snapshot.connectionState {
@@ -291,8 +299,8 @@ private struct ConfiguredHostView: View {
                 }
             }
             .padding(.horizontal, 24)
-            .padding(.top, 28)
-            .padding(.bottom, 32)
+            .padding(.top, density == .compact ? 14 : 28)
+            .padding(.bottom, density == .compact ? 16 : 32)
         }
         .sheet(isPresented: $isConnectionInfoPresented) {
             ConnectionInfoView(snapshot: snapshot)
@@ -446,7 +454,7 @@ private struct ConfiguredHostView: View {
 
     @ViewBuilder
     private var shellWorkspace: some View {
-        VStack(alignment: .leading, spacing: 22) {
+        VStack(alignment: .leading, spacing: density == .compact ? 12 : 22) {
             if snapshot.isShowingCachedMetadata {
                 ConnectionBannerView(
                     state: snapshot.connectionState,

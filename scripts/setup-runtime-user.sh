@@ -4,7 +4,10 @@ set -eu
 
 PATH='/usr/sbin:/usr/bin:/sbin:/bin'
 export PATH
-unset CDPATH ENV BASH_ENV
+unset CDPATH ENV BASH_ENV PYTHONHOME PYTHONPATH
+unset LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GCONV_PATH LOCPATH TMPDIR
+LC_ALL=C
+export LC_ALL
 
 if [ "$(id -u)" -eq 0 ]; then
     TRUSTED_SELF=$(readlink -f -- "$0")

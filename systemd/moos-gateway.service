@@ -20,6 +20,7 @@ StandardError=journal
 SyslogIdentifier=moos-gateway
 NoNewPrivileges=yes
 PrivateTmp=yes
+PrivatePIDs=yes
 PrivateDevices=yes
 ProtectSystem=strict
 ProtectHome=yes

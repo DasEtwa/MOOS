@@ -4,7 +4,10 @@ set -eu
 
 PATH='/usr/sbin:/usr/bin:/sbin:/bin'
 export PATH
-unset CDPATH ENV BASH_ENV
+unset CDPATH ENV BASH_ENV PYTHONHOME PYTHONPATH
+unset LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GCONV_PATH LOCPATH TMPDIR
+LC_ALL=C
+export LC_ALL
 
 if [ "$(id -u)" -eq 0 ]; then
     TRUSTED_SELF=$(readlink -f -- "$0")
@@ -46,7 +49,7 @@ Options:
   --dry-run         Print paths and permissions without modifying the host.
   -h, --help        Show this help.
 
-The staged files are owned by moos-runtime. The source repository is never
+The staged files are root-owned and read-only to moos-runtime. The source repository is never
 mounted into the runtime account or copied wholesale into Instance storage.
 EOF
 }
@@ -167,7 +170,7 @@ id "$RUNTIME_USER" >/dev/null 2>&1 || {
     exit 1
 }
 
-for command_name in chown cp find install mktemp mv readlink rm rmdir; do
+for command_name in chown cp find flock install mktemp mv python3 readlink rm rmdir stat sync systemd-run; do
     command -v "$command_name" >/dev/null 2>&1 || {
         echo "error: required host command is missing: $command_name" >&2
         exit 1
@@ -182,6 +185,24 @@ case "$AUTHENTICATED_SCRIPT" in
         ;;
 esac
 
+# Serialize the shared runtime tree across all Instance IDs.
+[ -d "$STATE_ROOT/runtime" ] && [ ! -L "$STATE_ROOT/runtime" ] || {
+    echo 'error: trusted runtime directory is missing' >&2; exit 1;
+}
+[ "$(stat -c %u:%a "$STATE_ROOT/runtime")" = '0:750' ] || {
+    echo 'error: unsafe runtime directory ownership or mode' >&2; exit 1;
+}
+RUNTIME_LOCK="$STATE_ROOT/runtime/.stage.lock"
+if [ -e "$RUNTIME_LOCK" ] || [ -L "$RUNTIME_LOCK" ]; then
+    [ ! -L "$RUNTIME_LOCK" ] && [ -f "$RUNTIME_LOCK" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$RUNTIME_LOCK")" = '0:0:600:1' ] || {
+        echo 'error: unsafe runtime staging lock' >&2; exit 1;
+    }
+fi
+(umask 077; : >> "$RUNTIME_LOCK")
+exec 9>>"$RUNTIME_LOCK"
+flock -w 30 9 || { echo 'error: another runtime staging is active' >&2; exit 1; }
+
 [ ! -e "$INSTANCE_DIR" ] || {
     echo "error: Instance already exists: $INSTANCE_ID" >&2
     echo '       refusing an implicit replacement; use a new ID or an explicit migration procedure' >&2
@@ -194,9 +215,53 @@ esac
     exit 1
 }
 
+# Linux directory exchange keeps the active runtime present even if the
+# installer is killed. This inline code belongs to the authenticated release;
+# isolated Python must never import executable code from the source checkout.
+exchange_runtime() {
+    python3 -I - "$1" "$2" <<'PYTHON'
+import ctypes
+import os
+import sys
+
+libc = ctypes.CDLL(None, use_errno=True)
+rename = libc.renameat2
+rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+rename.restype = ctypes.c_int
+if rename(-100, os.fsencode(sys.argv[1]), -100, os.fsencode(sys.argv[2]), 2) != 0:
+    raise OSError(ctypes.get_errno(), "atomic runtime exchange failed")
+fd = os.open(os.path.dirname(sys.argv[2]), os.O_RDONLY | os.O_DIRECTORY)
+try:
+    os.fsync(fd)
+finally:
+    os.close(fd)
+PYTHON
+}
+
 QEMU_STAGE_DIR=''
 INSTANCE_STAGE_DIR=''
+PREVIOUS_QEMU_ROOT=''
+QEMU_ORIGINAL_ID=''
+QEMU_ACTIVATED=0
+STAGING_COMMITTED=0
 cleanup() {
+    trap '' HUP INT TERM
+    if [ "$STAGING_COMMITTED" -eq 0 ]; then
+        if [ -n "$PREVIOUS_QEMU_ROOT" ] && [ -d "$PREVIOUS_QEMU_ROOT" ]; then
+            # Inspect identity instead of relying on a flag set after the
+            # syscall: a signal can arrive immediately after the exchange.
+            if [ -n "$QEMU_ORIGINAL_ID" ] &&
+               [ "$(stat -c %d:%i "$RUNTIME_QEMU_ROOT")" != "$QEMU_ORIGINAL_ID" ]; then
+                exchange_runtime "$PREVIOUS_QEMU_ROOT" "$RUNTIME_QEMU_ROOT" || {
+                    echo "error: rollback failed; preserved runtime at $PREVIOUS_QEMU_ROOT" >&2
+                    return
+                }
+            fi
+            rm -rf -- "$PREVIOUS_QEMU_ROOT"
+        elif [ "$QEMU_ACTIVATED" -eq 1 ]; then
+            rm -rf -- "$RUNTIME_QEMU_ROOT"
+        fi
+    fi
     if [ -n "$QEMU_STAGE_DIR" ] && [ -d "$QEMU_STAGE_DIR" ]; then
         rm -rf -- "$QEMU_STAGE_DIR"
     fi
@@ -204,7 +269,8 @@ cleanup() {
         rm -rf -- "$INSTANCE_STAGE_DIR"
     fi
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 
 if [ ! -x "$STAGED_QEMU" ] || [ "$REFRESH_RUNTIME" -eq 1 ]; then
     install -d -o root -g "$RUNTIME_GROUP" -m 0750 "$STATE_ROOT/runtime"
@@ -220,13 +286,15 @@ if [ ! -x "$STAGED_QEMU" ] || [ "$REFRESH_RUNTIME" -eq 1 ]; then
     find "$QEMU_STAGE_DIR" -type f -exec chmod 0640 {} +
     chmod 0750 "$QEMU_STAGE_DIR/bin/qemu-system-x86_64"
 
-    if [ -e "$RUNTIME_QEMU_ROOT" ]; then
-        previous_qemu_root=$(mktemp -d "$STATE_ROOT/runtime/.qemu-host-previous.XXXXXX")
-        rmdir "$previous_qemu_root"
-        mv -- "$RUNTIME_QEMU_ROOT" "$previous_qemu_root"
-    fi
-    mv -- "$QEMU_STAGE_DIR" "$RUNTIME_QEMU_ROOT"
-    QEMU_STAGE_DIR=''
+    # Validate only the root-owned copy under the final unprivileged identity.
+    systemd-run --quiet --wait --collect --pipe \
+        --property=User="$RUNTIME_USER" --property=Group="$RUNTIME_GROUP" \
+        --property=NoNewPrivileges=yes --property=PrivateNetwork=yes \
+        --property=PrivateDevices=yes --property=ProtectHome=yes \
+        --property=ProtectSystem=strict --property=CapabilityBoundingSet= \
+        --property=MemoryMax=256M --property=TasksMax=32 --property=RuntimeMaxSec=30 \
+        "$QEMU_STAGE_DIR/bin/qemu-system-x86_64" --version
+
 fi
 
 INSTANCE_STAGE_DIR=$(mktemp -d "$INSTANCE_ROOT/.$INSTANCE_ID.XXXXXX")
@@ -235,8 +303,32 @@ install -o root -g "$RUNTIME_GROUP" -m 0440 \
     "$IMAGE_DIR/bzImage" "$INSTANCE_STAGE_DIR/bzImage"
 install -o root -g "$RUNTIME_GROUP" -m 0440 \
     "$IMAGE_DIR/rootfs.ext2" "$INSTANCE_STAGE_DIR/rootfs.ext2"
+if [ -n "$QEMU_STAGE_DIR" ]; then
+    if [ -e "$RUNTIME_QEMU_ROOT" ]; then
+        QEMU_ORIGINAL_ID=$(stat -c %d:%i "$RUNTIME_QEMU_ROOT")
+        PREVIOUS_QEMU_ROOT=$(mktemp -d "$STATE_ROOT/runtime/.qemu-host-previous.XXXXXX")
+        rmdir "$PREVIOUS_QEMU_ROOT"
+        mv -- "$QEMU_STAGE_DIR" "$PREVIOUS_QEMU_ROOT"
+        QEMU_STAGE_DIR=''
+        sync -f "$PREVIOUS_QEMU_ROOT"
+        exchange_runtime "$PREVIOUS_QEMU_ROOT" "$RUNTIME_QEMU_ROOT"
+    else
+        QEMU_ACTIVATED=1
+        mv -- "$QEMU_STAGE_DIR" "$RUNTIME_QEMU_ROOT"
+        QEMU_STAGE_DIR=''
+    fi
+    QEMU_ACTIVATED=1
+fi
 mv -- "$INSTANCE_STAGE_DIR" "$INSTANCE_DIR"
 INSTANCE_STAGE_DIR=''
+STAGING_COMMITTED=1
+# Keep one rollback tree; prune only after both activations succeeded.
+if [ "$QEMU_ACTIVATED" -eq 1 ]; then
+    for old_runtime in "$STATE_ROOT"/runtime/.qemu-host-previous.*; do
+        [ -d "$old_runtime" ] && [ ! -L "$old_runtime" ] || continue
+        [ "$old_runtime" = "$PREVIOUS_QEMU_ROOT" ] || rm -rf -- "$old_runtime"
+    done
+fi
 
 echo "MOOS Instance staged: $INSTANCE_ID"
 echo "  storage: $INSTANCE_DIR"

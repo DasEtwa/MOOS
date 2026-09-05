@@ -5,6 +5,9 @@ set -eu
 PATH='/usr/sbin:/usr/bin:/sbin:/bin'
 export PATH
 unset CDPATH ENV BASH_ENV PYTHONHOME PYTHONPATH
+unset LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GCONV_PATH LOCPATH TMPDIR
+LC_ALL=C
+export LC_ALL
 
 if [ "$(id -u)" -eq 0 ]; then
     TRUSTED_SELF=$(readlink -f -- "$0")
@@ -34,7 +37,7 @@ LISTEN_ADDRESS=''
 PORT='7411'
 BINARY_ROOT=''
 DRY_RUN=0
-EXPECTED_GATEWAY_UNIT_SHA256='a3c54b0d3667387a5670059f51a6cedd370bbbc8a897084058f304dd41e94108'
+EXPECTED_GATEWAY_UNIT_SHA256='282b35fe1b9b0ba5a3f21a7f243e7e048c4481cee5cc8b0251e60a3188479e0a'
 
 usage() {
     cat <<'EOF'
@@ -144,7 +147,7 @@ case "$SOURCE_ROOT" in
     /usr/lib/moos/admin-releases/*) ;;
     *) fail "privileged source is not an authenticated administrator release: $SOURCE_ROOT" ;;
 esac
-for command_name in awk chmod chown dd flock getent groupadd install mktemp mv passwd rm sha256sum stat systemctl systemd-run tr useradd; do
+for command_name in awk chmod chown dd flock getent groupadd install mktemp mv passwd rm sha256sum stat sync systemctl systemd-run tr useradd; do
     command -v "$command_name" >/dev/null 2>&1 || fail "required host command is missing: $command_name"
 done
 [ -d /run/moos ] && [ ! -L /run/moos ] || fail 'trusted control-plane runtime directory is missing'
@@ -223,8 +226,16 @@ mv -f "$UID_TEMP" "$CONFIG_ROOT/gateway.uid"
 trap - EXIT HUP INT TERM
 
 if [ ! -e "$STATE_ROOT/devices.json" ]; then
-    install -o root -g "$GATEWAY_GROUP" -m 0640 /dev/null "$STATE_ROOT/devices.json"
-    printf '{"devices":[],"schemaVersion":1}\n' > "$STATE_ROOT/devices.json"
+    DEVICE_TEMP=$(mktemp "$STATE_ROOT/.devices-init.XXXXXX")
+    trap 'rm -f -- "$DEVICE_TEMP"' EXIT
+    trap 'exit 1' HUP INT TERM
+    printf '{"devices":[],"schemaVersion":1}\n' > "$DEVICE_TEMP"
+    chown root:"$GATEWAY_GROUP" "$DEVICE_TEMP"
+    chmod 0640 "$DEVICE_TEMP"
+    sync -f "$DEVICE_TEMP"
+    mv -- "$DEVICE_TEMP" "$STATE_ROOT/devices.json"
+    sync -f "$STATE_ROOT"
+    trap - EXIT HUP INT TERM
 else
     [ "$(stat -c %a "$STATE_ROOT/devices.json")" = '640' ] && \
     [ "$(stat -c %U:%G "$STATE_ROOT/devices.json")" = "root:$GATEWAY_GROUP" ] || \
@@ -433,7 +444,8 @@ fi
 if ! systemctl daemon-reload || \
    ! systemctl enable moos-gateway.service || \
    ! systemctl restart moos-gateway.service || \
-   ! systemctl is-active --quiet moos-gateway.service; then
+   ! systemctl is-active --quiet moos-gateway.service || \
+   [ "$(systemctl show --property=PrivatePIDs --value moos-gateway.service)" != 'yes' ]; then
     if rollback_install; then
         fail 'MOOS Gateway failed to become active; previous installation restored'
     fi

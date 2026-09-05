@@ -4,12 +4,17 @@
 from __future__ import annotations
 
 import argparse
+import codecs
+import signal
+import termios
+import tty
 import json
 import os
 import select
 import socket
 import sys
 from collections import deque
+from contextlib import contextmanager
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -103,7 +108,38 @@ def _write_terminal_frame(frame: dict) -> bool:
     raise ValueError("daemon sent an invalid terminal frame")
 
 
+@contextmanager
+def raw_terminal():
+    fd = sys.stdin.fileno()
+    if not os.isatty(fd):
+        yield
+        return
+    previous = termios.tcgetattr(fd)
+    handlers = {}
+
+    def interrupted(signum, frame):
+        raise SystemExit(128 + signum)
+
+    try:
+        for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+            handlers[signum] = signal.signal(signum, interrupted)
+        tty.setraw(fd)
+        yield
+    finally:
+        try:
+            termios.tcsetattr(fd, termios.TCSANOW, previous)
+        finally:
+            for signum, handler in handlers.items():
+                signal.signal(signum, handler)
+
+
 def terminal(socket_path: Path) -> int:
+    with raw_terminal():
+        return _terminal(socket_path)
+
+
+def _terminal(socket_path: Path) -> int:
+    input_decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
         connection.connect(str(socket_path))
         connection.sendall(
@@ -131,11 +167,12 @@ def terminal(socket_path: Path) -> int:
             readable, _, _ = select.select([sys.stdin, connection], [], [])
             if sys.stdin in readable:
                 data = os.read(sys.stdin.fileno(), 2048)
+                text = input_decoder.decode(data, final=not data)
+                if text:
+                    connection.sendall(encode_frame(make_terminal_input(text)))
                 if not data:
                     connection.sendall(encode_frame(make_terminal_close()))
                     return 0
-                frame = make_terminal_input(data.decode("utf-8", errors="replace"))
-                connection.sendall(encode_frame(frame))
             if connection in readable:
                 data = connection.recv(READ_BYTES)
                 if not data:

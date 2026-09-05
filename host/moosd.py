@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import codecs
 import logging
 import os
 import pwd
@@ -42,6 +43,10 @@ from moos_runtime import (
 READ_BYTES = 4096
 TERMINAL_READ_BYTES = 2048
 LOG = logging.getLogger(__name__)
+MAX_CLIENTS = 32
+MAX_CLIENTS_PER_UID = 4
+CLIENT_IDLE_TIMEOUT = 20.0
+
 GATEWAY_USER = "moos-gateway"
 GATEWAY_UID_PATH = Path("/etc/moos/gateway.uid")
 GATEWAY_OPERATIONS = frozenset({"status"})
@@ -146,16 +151,48 @@ def serve(
         os.chmod(socket_path, 0o660)
         listener.listen(16)
 
+    clients: dict[int, int] = {}
+    clients_lock = threading.Lock()
+
+    def handle_bounded(connection: socket.socket, uid: int) -> None:
+        try:
+            _handle_client(connection, service)
+        finally:
+            with clients_lock:
+                clients[uid] -= 1
+                if not clients[uid]:
+                    del clients[uid]
+
     try:
         while True:
             connection, _ = listener.accept()
+            try:
+                uid = _peer_uid(connection)
+            except OSError:
+                connection.close()
+                continue
+            with clients_lock:
+                if (
+                    sum(clients.values()) >= MAX_CLIENTS
+                    or clients.get(uid, 0) >= MAX_CLIENTS_PER_UID
+                ):
+                    connection.close()
+                    continue
+                clients[uid] = clients.get(uid, 0) + 1
             worker = threading.Thread(
-                target=_handle_client,
-                args=(connection, service),
+                target=handle_bounded,
+                args=(connection, uid),
                 daemon=True,
                 name="moosd-client",
             )
-            worker.start()
+            try:
+                worker.start()
+            except RuntimeError:
+                connection.close()
+                with clients_lock:
+                    clients[uid] -= 1
+                    if not clients[uid]:
+                        del clients[uid]
     finally:
         if owns_listener:
             listener.close()
@@ -203,6 +240,7 @@ def _handle_client(connection: socket.socket, service: MoosdService) -> None:
     decoder = FrameDecoder()
     with connection:
         try:
+            connection.settimeout(CLIENT_IDLE_TIMEOUT)
             peer_uid = _peer_uid(connection)
             gateway_uids = _gateway_uids()
             allowed_operations = (
@@ -297,6 +335,7 @@ def _serve_terminal(
     """Bridge framed client input to one reconnectable guest console connection."""
 
     decoder = decoder or FrameDecoder()
+    output_decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
     try:
         if initial_results and not _handle_terminal_results(
             connection, channel, initial_results
@@ -315,12 +354,13 @@ def _serve_terminal(
                     return
             if channel in readable:
                 output = channel.read(TERMINAL_READ_BYTES)
-                if not output:
-                    return
-                if not _send(
+                text = output_decoder.decode(output, final=not output)
+                if text and not _send(
                     connection,
-                    make_terminal_output(output.decode("utf-8", errors="replace")),
+                    make_terminal_output(text),
                 ):
+                    return
+                if not output:
                     return
     except OSError:
         return

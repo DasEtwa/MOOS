@@ -3,6 +3,7 @@
 
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -11,13 +12,26 @@ RUNNER = REPO_ROOT / "scripts" / "run-qemu.sh"
 
 
 def run(*arguments, expected=0):
-    result = subprocess.run(
-        [str(RUNNER), *arguments],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    # Dry-run policy checks must work in a clean checkout without built images.
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        images = root / "images"
+        images.mkdir()
+        (images / "bzImage").touch()
+        (images / "rootfs.ext2").touch()
+        qemu = root / "qemu" / "bin" / "qemu-system-x86_64"
+        qemu.parent.mkdir(parents=True)
+        (root / "qemu" / "lib").mkdir()
+        (root / "qemu" / "share" / "qemu").mkdir(parents=True)
+        qemu.write_text("#!/bin/sh\nexit 99\n")
+        qemu.chmod(0o700)
+        result = subprocess.run(
+            [str(RUNNER), "--qemu", str(qemu), "--image-dir", str(images), *arguments],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
     if result.returncode != expected:
         raise AssertionError(
             f"launcher returned {result.returncode}, expected {expected}: "

@@ -5,6 +5,9 @@ set -eu
 PATH='/usr/sbin:/usr/bin:/sbin:/bin'
 export PATH
 unset CDPATH ENV BASH_ENV PYTHONHOME PYTHONPATH
+unset LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GCONV_PATH LOCPATH TMPDIR
+LC_ALL=C
+export LC_ALL
 
 if [ "$(id -u)" -eq 0 ]; then
     TRUSTED_SELF=$(readlink -f -- "$0")
@@ -29,7 +32,7 @@ UNIT_ROOT='/etc/systemd/system'
 DOC_ROOT='/usr/share/doc/moos'
 DAEMON_VERSION='MOOS control daemon 1'
 MANIFEST_RELATIVE='configs/control-plane-manifest.sha256'
-MANIFEST_SHA256='8f603b18adbfd8bd8b26cd7b9e8331587e6a5e2187d162667d3458b025aa70ff'
+MANIFEST_SHA256='ab0bf9d4788fb575c5dc88764d727b153c9b2abf8ef8d31fb88c1490d47ed0d7'
 DRY_RUN=0
 
 usage() {
@@ -499,6 +502,8 @@ systemctl restart moosd.socket
 systemctl is-active --quiet moosd.socket
 timeout 10 /usr/bin/moos --socket /run/moos/moosd.sock status >/dev/null
 systemctl is-active --quiet moosd.service
+[ "$(systemctl show --property=TasksMax --value moosd.service)" = '64' ]
+[ "$(systemctl show --property=MemoryMax --value moosd.service)" = '134217728' ]
 
 SUCCESS=1
 ACTIVATING=0

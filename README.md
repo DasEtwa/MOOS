@@ -115,6 +115,13 @@ latest 6.18 patch at kernel.org, update both guest configs, and update the
 tracked `linux` and `linux-headers` SHA-256 files together; the release-profile
 test rejects version/hash drift between those inputs.
 
+MOOS tracks stable Buildroot releases. Before a MOOS release, review the
+Buildroot release announcements and support status, update `BUILDROOT_RELEASE`
+and its exact `BUILDROOT_REF` together, and rebase only the tracked patches.
+Rebuild both profiles and run the guest boot/login, DHCP, utilities,
+reboot/poweroff, terminal bridge, and runtime policy tests before adopting a pin.
+GitHub Action pins are maintained through weekly Dependabot pull requests.
+
 The script intentionally reapplies the tracked baseline configuration. For
 temporary experiments, use Buildroot directly after the baseline build:
 

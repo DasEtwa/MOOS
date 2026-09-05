@@ -29,7 +29,7 @@ struct MockMOOSStateService: MOOSStateProviding {
             isShowingCachedMetadata: scenario != .connected
         )
 
-        return AsyncStream { continuation in
+        return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             continuation.yield(snapshot)
             continuation.finish()
         }

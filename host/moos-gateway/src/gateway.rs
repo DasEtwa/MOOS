@@ -495,6 +495,27 @@ mod tests {
     }
 
     #[test]
+    fn incomplete_frames_expire_despite_continuous_bytes() -> Result<(), String> {
+        let (mut receiver, mut sender) = UnixStream::pair().map_err(|e| e.to_string())?;
+        let writer = thread::spawn(move || {
+            for _ in 0..40 {
+                if sender.write_all(b" ").is_err() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+        });
+        let started = Instant::now();
+        let result =
+            FrameReader::new().receive(&mut receiver, Some(started + Duration::from_millis(40)));
+        assert!(result.is_err());
+        assert!(started.elapsed() < Duration::from_millis(180));
+        drop(receiver);
+        writer.join().map_err(|_| "writer panicked")?;
+        Ok(())
+    }
+
+    #[test]
     fn authentication_uses_one_absolute_deadline() -> Result<(), String> {
         let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
         let address = listener.local_addr().map_err(|error| error.to_string())?;
