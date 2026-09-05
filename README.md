@@ -33,6 +33,11 @@ device signing remain unimplemented. Its unsigned GitHub Release/SideStore
 distribution channel is active; SideStore performs signing and installation
 outside this repository.
 
+The latest published iOS release is `ios-v0.1.3` (version `0.1.3`, build `4`).
+The current default branch also contains the post-release host, gateway, and
+control-plane hardening; the release channel and the production branch are
+therefore intentionally not the same snapshot.
+
 ## Repository layout
 
 | Path | Purpose |

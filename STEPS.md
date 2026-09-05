@@ -224,7 +224,8 @@ Completion criteria: one device can be authorized and revoked safely.
 
 Do not do yet: Google/Gmail login or global account infrastructure.
 
-Status: Implemented; Rust migration complete, post-migration device acceptance pending
+Status: Implemented; Rust migration complete, one real iPhone authentication
+observed, post-replacement reconnect acceptance pending
 
 Implementation: the production `moos-gateway` and `moos-gateway-device` are
 synchronous Rust binaries built with exact Rust 1.97.1 and `Cargo.lock`.
@@ -237,7 +238,9 @@ schema, keys, UUIDs, pairing code, HMAC transcripts, grants, and paths remain
 compatible with the Python implementation, which is no longer installed or
 executed. Automated cross-client, malformed-input, revocation, rotation,
 concurrent-store, permission, and denial-before-backend tests pass. A real
-paired iPhone reconnect after replacing the installed service remains pending.
+paired iPhone authentication against the Rust service was observed on
+2026-08-20. End-to-end reconnect acceptance after replacing the installed
+service remains pending.
 
 ## Slice M8 — Tailscale host transport
 
@@ -421,7 +424,8 @@ any version, test, iPhoneOS/arm64, unsigned-bundle, IPA, source-history, or Page
 preparation error; only the publish job can create the Release; SideStore can
 consume a stable Pages source whose versions point to immutable Release assets.
 
-Status: Implemented and verified with `ios-v0.1.1`.
+Status: Implemented and verified through the published `ios-v0.1.3` release
+(Xcode version `0.1.3`, build `4`).
 Implemented commits: `build(ios): centralize unsigned IPA packaging`,
 `feat(ios): add deterministic AltSource tooling`,
 `ci(ios): add guarded release publishing`,
@@ -440,10 +444,12 @@ fixture AltSource generation/validation, and `git diff --check` passed.
 has no non-interactive sudo and its root-only Personal image staging is absent;
 this distribution-only slice does not change that runtime. The complete macOS
 simulator, unit-test, and unsigned iPhoneOS/arm64 workflow passed for the
-published `ios-v0.1.1` release.
-The one-time Pages setting **Settings → Pages → Build and deployment → Source:
-GitHub Actions** is enabled. Release `ios-v0.1.1`, its unsigned `MOOS.ipa`, and
-the stable SideStore source were published successfully.
+published `ios-v0.1.3` release (workflow run `32419535993`). The published
+release sequence is `ios-v0.1.1`, `ios-v0.1.2`, and `ios-v0.1.3`.
+The Pages setting **Settings → Pages → Build and deployment → Source:
+GitHub Actions** is enabled. Release `ios-v0.1.3`, its unsigned `MOOS.ipa`, and
+the stable SideStore source were published successfully. The current source is
+`https://dasetwa.github.io/MOOS/ios/source.json`.
 Security: normal CI is `contents: read`; only the tag-only Release job receives
 `contents: write`; Pages receives only its required scoped write/OIDC rights.
 There is no `pull_request_target`, PAT, Apple credential, certificate,
@@ -452,14 +458,24 @@ change.
 Blockers: none in repository code.
 Deviations: none.
 
+### Current default-branch CI note — 2026-09-05
+
+The post-merge `main` checks passed for Host, Gateway, and the unsigned
+physical-device IPA. The iOS simulator job failed before compilation because
+the hosted runner did not provide the requested `iPhone 16` / `iOS 18.5`
+destination; the preceding `Low-bugs` checks passed. This is CI runner-image
+drift to resolve before treating the default-branch iOS workflow as fully green,
+not evidence that the published `ios-v0.1.3` release failed.
+
 ## Mobile integration status
 
 - The production iOS application uses the authenticated Gateway session, keeps
   its device key in the Keychain, and requests real Protocol-v1 status.
 - The Gateway carries unchanged status frames over Tailscale without directly
   publishing the local control socket.
-- Real Host/iPhone acceptance remains to be performed on Apple hardware with a
-  configured tailnet.
+- Full Host/iPhone acceptance after installed-service replacement remains to be
+  performed on Apple hardware with a configured tailnet; one Rust-Gateway
+  authentication was already observed.
 - Connect a native Terminal UI to the real Personal terminal only after those
   boundaries pass real-device tests. Client disconnect must not stop Personal.
 - Review the native shell experiment before committing to radial navigation,

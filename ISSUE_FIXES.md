@@ -1,9 +1,10 @@
 # Open issue review — 2026-09-05
 
 All 18 open GitHub issues were compared with branch `Low-bugs`, starting at
-`0a2e836`. Some findings had already been implemented in that branch. This
-record distinguishes those changes from the remaining fixes; it does not
-claim that local changes have been deployed or that GitHub issues are closed.
+`0a2e836`. Some findings had already been implemented in that branch. Pull
+request #33 subsequently merged those changes into the default branch at
+`dacc9f4`. This record distinguishes the implemented resolutions from the
+remaining issue state; it does not claim that GitHub issues are closed.
 
 | Issue | Resolution and verification |
 | --- | --- |
@@ -70,6 +71,12 @@ GitHub Actions verification on 2026-09-05:
   passed on `ba447b0`. The initial CI run exposed a launcher test dependency on
   local QEMU build artifacts; that dry-run test now creates temporary fixtures.
   Production sources are unchanged from the successful iOS/Gateway runs.
+- The post-merge `main` run [33989672458](https://github.com/DasEtwa/MOOS/actions/runs/33989672458)
+  passed its unsigned physical-device job, Host, and Gateway jobs. Its iOS
+  simulator job failed before compilation because the hosted runner did not
+  provide the requested `iPhone 16` / `iOS 18.5` destination; the preceding
+  `Low-bugs` iOS run passed. This is runner-image drift, not a newly observed
+  product failure.
 
 No privileged MOOS installation was performed: effective post-install properties and staging under
 the real service account must also be checked on the deployment host. The

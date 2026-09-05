@@ -4,6 +4,10 @@
 iPhone and consumes only client-facing concepts such as a Host, Personal MOOS,
 and connection state.
 
+The current project metadata is version `0.1.3`, build `4`. The corresponding
+unsigned release `ios-v0.1.3` is published; later source changes on the default
+branch are not automatically a new iOS release.
+
 When iOS backgrounds the app, the client closes its live Gateway session and
 pauses status polling. Returning to the foreground immediately creates and
 authenticates a fresh session before the UI can report Connected again. This
@@ -91,7 +95,12 @@ the tag against Xcode metadata, publishes the unsigned app as the stable
 `MOOS.ipa` GitHub Release asset, and deploys SideStore update metadata to GitHub
 Pages. Signing and installation remain entirely external in SideStore. See
 [`distribution/ios/README.md`](../../distribution/ios/README.md) for the
-one-time Pages setting and exact release procedure.
+Pages setting and exact release procedure.
+
+The published `ios-v0.1.3` release workflow passed. On the later default-branch
+push on 2026-09-05, the unsigned device job passed but the simulator build could
+not find the requested `iPhone 16` / `iOS 18.5` destination on the hosted runner;
+local Linux cannot reproduce that macOS runner condition.
 
 The equivalent project and scheme are:
 

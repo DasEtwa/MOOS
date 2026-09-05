@@ -8,6 +8,21 @@ and update installation on the iPhone.
 No Apple certificate, provisioning profile, Apple account, signing secret, or
 private key belongs in this repository or in GitHub Actions.
 
+## Current channel state — 2026-09-05
+
+The latest published release is `ios-v0.1.3` (version `0.1.3`, build `4`). The
+published release sequence is `ios-v0.1.1`, `ios-v0.1.2`, and `ios-v0.1.3`. The
+stable SideStore source is currently:
+
+```text
+https://dasetwa.github.io/MOOS/ios/source.json
+```
+
+The source lists the immutable `MOOS.ipa` asset from `ios-v0.1.3` first. The
+release workflow for `ios-v0.1.3` passed; later default-branch simulator CI had
+a hosted-runner destination failure before compilation, while its unsigned
+physical-device job passed.
+
 ## Release architecture
 
 Normal pushes, pull requests, and manual runs execute only
@@ -43,15 +58,15 @@ default-branch tip both avoids that limitation and prevents a release from an
 unmerged branch. The workflow checks this once before CI and again immediately
 before publication.
 
-## One-time GitHub Pages setting
+## GitHub Pages setting
 
-Before the first release, open **Repository Settings → Pages → Build and
-deployment** and set **Source** to **GitHub Actions**. No external host, PAT,
-custom domain, or Pages branch is required.
+The repository is configured at **Repository Settings → Pages → Build and
+deployment → Source: GitHub Actions**. A fresh fork or a new repository must
+make the same setting before the first release. No external host, PAT, custom
+domain, or Pages branch is required.
 
-Pages is not enabled for `DasEtwa/MOOS` at the time this documentation was
-written, so its final public base URL must not be guessed. After enabling Pages,
-retrieve GitHub's authoritative URL with:
+Retrieve GitHub's authoritative base URL when setting up another repository
+with:
 
 ```bash
 PAGES_BASE_URL="$(gh api repos/DasEtwa/MOOS/pages --jq .html_url)"
@@ -65,34 +80,36 @@ print("sidestore://source?" + urllib.parse.urlencode({"url": sys.argv[1]}))
 PY
 ```
 
-The first successful release workflow also prints both exact values in its job
-summary. The stable source will not exist until that first Pages deployment.
+The release workflow prints both exact values in its job summary. For the
+current repository, the stable source is already deployed at
+`https://dasetwa.github.io/MOOS/ios/source.json`.
 
-## Version bump and first release
+## Version bump and release
 
 Xcode project metadata is authoritative. In the `MOOSApp` target's **General →
 Identity** settings, update both values for every app build configuration:
 
-- **Version** / `MARKETING_VERSION`: semantic `MAJOR.MINOR.PATCH`, for example
-  `0.1.1`.
+- **Version** / `MARKETING_VERSION`: semantic `MAJOR.MINOR.PATCH`, greater than
+  the current published version `0.1.3`.
 - **Build** / `CURRENT_PROJECT_VERSION`: a positive integer greater than every
-  published build, for example `2`.
+  published build; the current project value is `4`.
 
-For the first update from `0.1.0` build `1` to `0.1.1` build `2`, commit the
-project change and let normal CI pass on the default branch before tagging:
+For a subsequent release, replace the example `0.1.4` / build `5` values below
+with the intended version and build, commit the project change, and let normal
+CI pass on the default branch before tagging:
 
 ```bash
 python3 scripts/ios_release_metadata.py validate-project \
   --project ios/MOOSApp/MOOSApp.xcodeproj/project.pbxproj \
-  --tag ios-v0.1.1
+  --tag ios-v0.1.4
 
 git add ios/MOOSApp/MOOSApp.xcodeproj/project.pbxproj
-git commit -m "chore(ios): bump version to 0.1.1"
+git commit -m "chore(ios): bump version to 0.1.4"
 git push origin main
 
 # Wait for the normal iOS workflow on this exact commit to pass.
-git tag ios-v0.1.1
-git push origin ios-v0.1.1
+git tag ios-v0.1.4
+git push origin ios-v0.1.4
 ```
 
 Do not tag a feature branch, reuse a published tag, silently rewrite Xcode
@@ -103,8 +120,8 @@ deliberately fail-closed.
 After success, the human-facing Release and stable asset are at:
 
 ```text
-https://github.com/DasEtwa/MOOS/releases/tag/ios-v0.1.1
-https://github.com/DasEtwa/MOOS/releases/download/ios-v0.1.1/MOOS.ipa
+https://github.com/DasEtwa/MOOS/releases/tag/ios-v0.1.4
+https://github.com/DasEtwa/MOOS/releases/download/ios-v0.1.4/MOOS.ipa
 ```
 
 The first URL changes per release page and the second is the immutable URL
@@ -134,10 +151,10 @@ GitHub's response is uncertain. Confirm that it is a draft before removing it,
 never delete its tag, and then re-run the release workflow jobs:
 
 ```bash
-gh release view ios-v0.1.1 --repo DasEtwa/MOOS \
+gh release view ios-v0.1.4 --repo DasEtwa/MOOS \
   --json isDraft,tagName,url
 # Only when isDraft is true:
-gh release delete ios-v0.1.1 --repo DasEtwa/MOOS --yes
+gh release delete ios-v0.1.4 --repo DasEtwa/MOOS --yes
 ```
 
 A published Release is immutable for this pipeline and must not be deleted or
