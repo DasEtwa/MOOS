@@ -165,6 +165,36 @@ Swift is current client-side code and is not part of the MOOS guest runtime:
   explicitly.
 - Keep UI experiments replaceable and test the service boundary independently.
 
+### iOS release versioning
+
+Every iOS build distributed to users, including a rebuild or hotfix, must have
+its own new release identity so it can be offered through the SideStore update
+channel instead of requiring a manual IPA replacement.
+
+- Before each publication, increase both `MARKETING_VERSION` (numeric
+  `MAJOR.MINOR.PATCH`) and `CURRENT_PROJECT_VERSION` (a positive integer greater
+  than every published build) in all app configurations. An unpublished local
+  build or CI retry does not by itself require a release-version bump.
+- Use `VERSION-bBUILD` when describing a shipped build, for example `0.1.4-b5`.
+  This is a human-readable label only: the IPA still contains
+  `CFBundleShortVersionString=0.1.4` and `CFBundleVersion=5`. Never put the `-b5`
+  suffix into the iOS version field or the canonical `ios-v0.1.4` tag.
+- Do not ship a changed IPA as the same release, bump only its build number,
+  overwrite a published asset, reuse a tag, or remove the prior source history.
+  Follow the current channel contract in [distribution/ios/README.md](distribution/ios/README.md):
+  create a new immutable release and prepend an AltSource entry whose `version`
+  and `buildVersion` exactly match the new IPA, using its new release URL.
+- Verify the project/tag/IPA/source metadata with the existing distribution
+  checks. Before claiming an in-app update works, confirm it from the previously
+  installed release in SideStore without uninstalling MOOS; otherwise record
+  device update acceptance as unverified. A display-label change alone is not
+  evidence that update detection is fixed.
+- This rule does not authorize tagging, publishing, signing or deployment;
+  those actions still require an explicit request.
+
+Apple documents the numeric version-field format in
+[CFBundleShortVersionString](https://developer.apple.com/documentation/bundleresources/information-property-list/cfbundleshortversionstring).
+
 ## Git workflow
 
 - Inspect git status, the current branch, and recent history before edits.
