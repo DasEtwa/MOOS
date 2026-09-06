@@ -469,6 +469,86 @@ device job; run `33990323811`) and its Gateway check passed (run `33990323853`).
 The effective current checks are green; the earlier failure was runner-image
 drift, not a product failure.
 
+## Operator UX foundation — 2026-09-06
+
+Prerequisites: implemented M4–M6 local control, existing authenticated
+administrator release contract, and existing status-only Gateway. This is a
+local operator slice, not completion of deferred M8 remote terminal work.
+
+Status: Implemented in the CLI; installed Host onboarding acceptance pending.
+
+`moos setup` detects local readiness and explains the administrator trust,
+local installation and optional remote-status paths. It asks only about remote
+status when no Gateway exists; non-interactive use is supported. `moos doctor`
+separates curated observations from rendering, reports actionable failures and
+unverified areas, and offers a sanitized schema-versioned JSON report. Local
+`start`, `stop`, and `shell` aliases use existing typed operations; explicit
+commands and default status JSON remain compatible. No installer, trust
+transition, protocol operation, resource policy or privilege was added. The
+existing CLI artifact remains in the unchanged administrator bundle allowlist;
+its control-plane manifest and embedded digest were refreshed.
+
+Verification: 18 operator tests; existing CLI, daemon, Protocol contract,
+runtime control, isolation, launcher, Personal identity, Host regression,
+release-profile, control-plane installer, administrator-release, Gateway auth
+and Gateway integration tests passed. Rust workspace tests passed (30 tests).
+Python compilation, shell syntax, diff checks and an unsigned administrator
+bundle build using the existing release binaries passed. Independent security
+review found no remaining blocking findings after correcting the initial
+lifecycle-timeout scope and adding direct trust-detector tests.
+
+The available generated image has locked root login (verified by the release
+rootfs validator). The development QEMU smoke attempt reached login but timed
+out waiting for its expected blank-password shell; this is the wrong image
+profile for that acceptance, not evidence of a CLI/runtime regression. The
+release QEMU smoke verifies boot and rejection of blank root login. Full
+development utility/login and terminal reconnect acceptance are not verified
+in this slice; no image was modified to bypass login. Real administrator
+installation/activation, account grants, private image staging, trust-channel
+authenticity and paired-iPhone connectivity remain unverified. ShellCheck was
+unavailable locally. No macOS or hardware claim is made.
+
+Deferred product steps: independently authenticated OS-package/bootstrap
+provisioning and an explicit release-guest login model, then first-run
+acceptance on a clean Host. No automatic fixes or signing-key creation/import
+inside checkout tooling. BRAIN/MOOS was not available in this workspace;
+README, ROADMAP and ARCHITECTURE there should record this operator model and
+its remaining bootstrap/login limitations when that context is available.
+
+### Operator presentation polish — 2026-09-06
+
+Setup, doctor and help now present short owner-neutral guidance. A separate
+presentation layer groups shared installation steps and labels results READY,
+NEEDS ATTENTION, BLOCKED or INFO by user impact. A stopped Personal and
+uninspected device authentication are not failures; trust mismatches still
+explicitly stop update installation. Technical observations remain available
+with `--verbose`, while the existing report schema, fields and diagnostic
+exit-code rules are unchanged. Optional emoji never replace text labels;
+non-interactive/CI/NO_COLOR/--no-color output is plain text with no ANSI escapes.
+
+A bounded read-only comparison can notice when the PATH-resolved CLI differs
+from the checkout. It never executes that file, infers version age, or changes
+installation. Human advice then uses the checkout's relative command. Host
+checks, protocol operations and terminal implementation are unchanged.
+
+Verification: 29 operator tests plus existing CLI, daemon, Protocol contract,
+Host regressions, runtime control, isolation, launcher, Personal identity,
+control-plane installer, administrator-release, Gateway auth and Gateway
+integration tests passed. Python compilation, shell syntax, diff checks and an
+unsigned administrator-bundle build using existing release binaries passed.
+An incremental AST comparison confirmed the existing checks and protocol/
+terminal paths were unchanged. Live setup/help output was inspected locally.
+The independent review found no blocking issue in the incremental code it
+examined, but its final review completion was unavailable due to a usage limit;
+the final diff was reviewed locally. No new security architecture is declared.
+
+No real installation, account grant, trust change, remote-device acceptance,
+QEMU boot or terminal session was performed for this presentation-only pass.
+The existing release-image/development-login limitation above still applies.
+ShellCheck remains unavailable. README was synchronized; this polish introduces
+no new BRAIN architecture requirement beyond the outstanding operator-model
+sync described above.
+
 ## Mobile integration status
 
 - The production iOS application uses the authenticated Gateway session, keeps
