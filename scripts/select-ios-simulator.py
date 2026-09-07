@@ -14,6 +14,8 @@ from typing import Any, Callable
 MINIMUM_IOS = (17, 0)
 PREFERRED_IOS = (18, 5)
 PREFERRED_DEVICE = "iPhone 16"
+SIMCTL_LIST_TIMEOUT = 120
+SIMCTL_CREATE_TIMEOUT = 60
 UUID = re.compile(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}")
 RUNTIME_ID = re.compile(r"com\.apple\.CoreSimulator\.SimRuntime\.iOS-[A-Za-z0-9.-]+")
 DEVICE_TYPE_ID = re.compile(r"com\.apple\.CoreSimulator\.SimDeviceType\.[A-Za-z0-9.-]+")
@@ -133,7 +135,7 @@ def create_simulator(
                     check=False,
                     capture_output=True,
                     text=True,
-                    timeout=30,
+                    timeout=SIMCTL_CREATE_TIMEOUT,
                 )
             except subprocess.TimeoutExpired:
                 failures.append(f"{device_name}/{runtime.name}: creation timed out")
@@ -155,7 +157,7 @@ def simctl_json(*arguments: str) -> dict[str, Any]:
             check=False,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=SIMCTL_LIST_TIMEOUT,
         )
     except subprocess.TimeoutExpired as error:
         raise SimulatorError(f"simctl {' '.join(arguments)} timed out") from error
