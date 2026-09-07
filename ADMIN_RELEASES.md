@@ -58,6 +58,14 @@ openssl dgst -sha256 -sign /secure/moos-admin-release-private.pem \
 Only the public key is provisioned on a MOOS host. Private keys, signatures,
 and provisioning credentials are not committed to this repository.
 
+The production verification path is tested without creating a signing identity
+in the checkout. `tests/admin_release.py` uses an immutable public NIST
+signature-verification vector for valid/tampered signature handling and tests
+the deterministic MOOS archive allowlist, extraction, activation, rollback and
+malicious-member rejection separately. A future end-to-end signed MOOS bundle
+fixture must be prepared in the independent signing environment and may return
+only with its public verification material and signature.
+
 ## Authenticate and install
 
 After the helper and public key have been provisioned independently:

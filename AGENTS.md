@@ -127,8 +127,11 @@ Stop implementation and report the blocker when any of these is true:
 - a secret, signing credential, token, private key, certificate, provisioning
   profile, Tailscale key, log credential, or machine-specific path would enter
   Git, an image, a snapshot, or CI;
-- a required `STEPS.md` prerequisite, acceptance test, or trust anchor is
-  missing;
+- a required `STEPS.md` prerequisite, acceptance test, or external trust
+  material is missing for the operation or acceptance claim being performed.
+  Missing external trust material blocks operations or acceptance that require
+  that material. It does not block implementing the missing trust/bootstrap
+  capability itself or verified work up to that boundary;
 - a review explicitly required by the task or release process is missing;
 - existing user changes overlap the requested files and cannot be preserved
   safely;

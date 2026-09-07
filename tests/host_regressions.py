@@ -216,6 +216,12 @@ mv() {
                 if not ref.startswith('./'):
                     self.assertRegex(ref, r'^[\w-]+/[\w-]+@[a-f0-9]{40}$')
 
+    def test_release_verification_tests_do_not_create_or_use_private_keys(self):
+        for relative in ('tests/admin_release.py', 'tests/operator_ux.py'):
+            source = (ROOT / relative).read_text()
+            self.assertNotIn('"genpkey"', source, relative)
+            self.assertNotRegex(source, r'["\x27]-sign["\x27]', relative)
+
 
 if __name__ == '__main__':
     unittest.main()

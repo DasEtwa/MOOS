@@ -7,12 +7,10 @@ import contextlib
 import importlib.machinery
 import importlib.util
 import io
-import hashlib
 import json
 import os
 import socket
 import stat
-import subprocess
 import sys
 import tempfile
 import threading
@@ -532,15 +530,17 @@ class ProbeTests(unittest.TestCase):
                                                           (0, b"moos-runtime"), (1, b"")]):
             self.assertEqual(probe.runtime_account(), "unknown")
 
-    def test_public_key_parser_with_ephemeral_test_identity(self):
-        # Test-only identity stays in memory, is never printed or installed.
-        generated = subprocess.run(["/usr/bin/openssl", "genpkey", "-algorithm", "EC",
-                                    "-pkeyopt", "ec_paramgen_curve:P-256"],
-                                   capture_output=True, check=True).stdout
-        public = subprocess.run(["/usr/bin/openssl", "pkey", "-pubout"], input=generated,
-                                capture_output=True, check=True).stdout
-        der = subprocess.run(["/usr/bin/openssl", "pkey", "-pubin", "-outform", "DER"],
-                             input=public, capture_output=True, check=True).stdout
+    def test_public_key_parser_with_public_verification_fixtures(self):
+        public_fixtures = (
+            (
+                ROOT / "tests/fixtures/nist-rsa-pkcs1v15-sha256-public.pub",
+                "0607c60011ab63c817425c970f53feb081f8fb8ff9ca267be4e9f6f281a26e73",
+            ),
+            (
+                ROOT / "tests/fixtures/nist-ecdsa-p256-public.pub",
+                "c3ecbb68212fa81cef8143c8aef5b2a4a0de1c89b79d0e77090cef64112f629a",
+            ),
+        )
         probe = moos.HostProbe()
         original_open, original_fstat = os.open, os.fstat
         def root_fstat(fd):
@@ -549,10 +549,19 @@ class ProbeTests(unittest.TestCase):
             return os.stat_result(result)
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "public.pem"
-            for data, expected in ((public, hashlib.sha256(der).hexdigest()),
-                                   (generated, None), (b"broken", None),
+            for fixture, expected in public_fixtures:
+                with self.subTest(fixture=fixture.name):
+                    path.write_bytes(fixture.read_bytes())
+                    path.chmod(0o644)
+                    with patch.object(probe, "trusted_file", return_value="present"), \
+                            patch.object(os, "open", side_effect=lambda name, flags: original_open(path, flags)), \
+                            patch.object(os, "fstat", side_effect=root_fstat):
+                        self.assertEqual(probe.public_fingerprint(), expected)
+            rsa_public = public_fixtures[0][0].read_bytes()
+            for data, expected in ((b"-----BEGIN PRIVATE KEY-----\ninvalid\n", None),
+                                   (b"broken", None),
                                    (b"-----BEGIN PUBLIC KEY-----\nbad", None),
-                                   (public + b"x" * 17000, None)):
+                                   (rsa_public + b"x" * 17000, None)):
                 path.write_bytes(data)
                 path.chmod(0o644)
                 with patch.object(probe, "trusted_file", return_value="present"), \
