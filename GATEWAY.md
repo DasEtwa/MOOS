@@ -215,3 +215,19 @@ copy the secret device store into Git or an ad-hoc rollback bundle.
 The current stripped x86-64 release artifacts are approximately 654 KB for the
 service and 560 KB for the administrator tool. They run outside the guest, so
 the MOOS rootfs size and boot path are unchanged.
+
+## Operator diagnostics
+
+`moos setup --remote` explains optional iPhone status prerequisites;
+`moos doctor` checks an installed Gateway automatically. The CLI reports
+Tailscale as unavailable, disconnected, connected, unhealthy or indeterminate,
+using a bounded local status probe. It does not print the raw JSON, addresses,
+peer names, login URLs or health messages. Gateway service activity and
+Tailscale connectivity do not establish a paired MOOS session or validate
+end-to-end reachability; test authenticated status on the intended iPhone.
+
+`moos setup --explain remote` guides installation/sign-in using Tailscale's own
+flow and the existing administrator installation/pairing procedure above.
+It does not configure Tailscale, change ACLs, read the credential store, invoke
+pairing, or grant remote operations. Device checks remain explicitly unverified
+rather than treating inaccessible credentials as an empty device list.

@@ -34,6 +34,7 @@ jobs:
         run: |
           python3 tests/moosd_protocol.py
           python3 tests/moos_cli.py
+          python3 tests/operator_ux.py
           python3 tests/runtime_control.py
           python3 tests/runtime_isolation.py
           python3 tests/control_plane_installer.py
