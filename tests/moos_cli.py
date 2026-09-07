@@ -140,10 +140,11 @@ def main():
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "command":
                 assert isinstance(node.args[0], ast.List)
                 verb = ast.literal_eval(node.args[0].elts[0])
-                assert verb in {"systemctl", "getent", "id", "tailscale"}, verb
+                assert verb in {"systemctl", "getent", "id", "passwd", "tailscale"}, verb
                 action = ast.literal_eval(node.args[0].elts[1])
                 assert (verb, action) in {("systemctl", "show"), ("getent", "passwd"),
-                                          ("id", "-G"), ("tailscale", "status")}
+                                          ("id", "-gn"), ("id", "-nG"),
+                                          ("passwd", "-S"), ("tailscale", "status")}
         assert direct_qemu.exists()
 
         fragmented_path = Path(temporary) / "fragmented.sock"

@@ -42,11 +42,16 @@ class FixtureProbe:
         self.gateway = "active"
         self.tail = "connected"
         self.tail_calls = 0
+        self.trusted_requirements = {}
+        self.trusted_parent_requirements = {}
 
     def host_supported(self): return self.supported
     def controllers(self): return self.limits
     def dependency(self, name): return name not in self.missing
-    def trusted_file(self, path): return self.files.get(path, "present")
+    def trusted_file(self, path, *, required_mode=0, required_parent_mode=0):
+        self.trusted_requirements[path] = required_mode
+        self.trusted_parent_requirements[path] = required_parent_mode
+        return self.files.get(path, "present")
     def runtime_account(self): return self.account
     def admin_release(self): return self.release
     def public_fingerprint(self): return self.fingerprint
@@ -104,6 +109,34 @@ class DiagnosisTests(unittest.TestCase):
         for key in ("host", "limits", "dependencies", "account", "release"):
             self.assertEqual(checks[key].state, "issue")
             self.assertTrue(checks[key].next_step)
+
+    def test_runtime_and_installer_executability_are_required_for_readiness(self):
+        checks = collect(self.probe)
+        self.assertEqual(self.probe.trusted_requirements["/usr/lib/moos/run-qemu.sh"], 0o555)
+        self.assertEqual(self.probe.trusted_requirements["/usr/libexec/moos/moos-admin-installer"], 0o555)
+        self.assertEqual(self.probe.trusted_requirements["/etc/moos/trust/admin-release.pem"], 0)
+        self.assertEqual(self.probe.trusted_parent_requirements["/usr/lib/moos/run-qemu.sh"], 0o111)
+        self.assertEqual(
+            self.probe.trusted_parent_requirements["/usr/libexec/moos/moos-admin-installer"], 0)
+        self.assertEqual(checks["runtime"].state, "ok")
+        self.assertEqual(checks["helper"].state, "info")
+
+        for path, check_id in (
+            ("/usr/lib/moos/run-qemu.sh", "runtime"),
+            ("/usr/libexec/moos/moos-admin-installer", "helper"),
+        ):
+            with self.subTest(path=path):
+                self.probe.files[path] = "unsafe"
+                self.assertNotIn(collect(self.probe)[check_id].state, {"ok", "info"})
+                self.probe.files.pop(path)
+
+    def test_invalid_runtime_account_contract_never_reports_ready(self):
+        for account, expected in (("unsafe", "issue"), ("unknown", "unknown"), ("missing", "issue")):
+            with self.subTest(account=account):
+                self.probe.account = account
+                self.assertEqual(collect(self.probe)["account"].state, expected)
+        self.probe.account = "present"
+        self.assertEqual(collect(self.probe)["account"].state, "ok")
 
     def test_trust_never_inferred_or_replaced(self):
         key = "/etc/moos/trust/admin-release.pem"
@@ -436,6 +469,27 @@ class ProbeTests(unittest.TestCase):
                                 (metadata(stat.S_IFREG | 0o644, links=2), "unsafe")):
             with patch.object(Path, "lstat", side_effect=lambda path: value if str(path) == "/key" else directory, autospec=True):
                 self.assertEqual(probe.trusted_file("/key"), expected)
+        for mode, expected in ((0o755, "present"), (0o555, "present"),
+                               (0o711, "unsafe"), (0o744, "unsafe"),
+                               (0o644, "unsafe")):
+            with self.subTest(mode=oct(mode)), patch.object(
+                    Path, "lstat",
+                    side_effect=lambda path, mode=mode: metadata(stat.S_IFREG | mode)
+                    if str(path) == "/program" else directory,
+                    autospec=True):
+                self.assertEqual(probe.trusted_file("/program", required_mode=0o555), expected)
+        unsearchable = os.stat_result((stat.S_IFDIR | 0o700, 0, 0, 1, 0, 0, 0, 0, 0, 0))
+        runtime_path = "/usr/lib/moos/run-qemu.sh"
+        with patch.object(
+                Path, "lstat", autospec=True,
+                side_effect=lambda path: metadata(stat.S_IFREG | 0o755)
+                if str(path) == runtime_path else
+                unsearchable if str(path) == "/usr/lib/moos" else directory):
+            self.assertEqual(
+                probe.trusted_file(runtime_path, required_mode=0o555,
+                                   required_parent_mode=0o111),
+                "unsafe",
+            )
         with patch.object(Path, "lstat", side_effect=PermissionError):
             self.assertEqual(probe.trusted_file("/key"), "unknown")
         with patch.object(Path, "lstat", side_effect=FileNotFoundError):
@@ -443,12 +497,40 @@ class ProbeTests(unittest.TestCase):
 
     def test_runtime_account(self):
         probe = moos.HostProbe()
-        for fields, groups, expected in ((b"moos-runtime:x:123:123::/var/lib/moos:/usr/sbin/nologin\n", b"123", "present"),
-                                         (b"moos-runtime:x:0:123::/:/bin/bash\n", b"123", "unsafe"),
-                                         (b"moos-runtime:x:123:123::/:/usr/sbin/nologin\n", b"123 999", "unsafe"),
-                                         (b"broken", b"123", "unknown")):
-            with patch.object(probe, "command", side_effect=[(0, fields), (0, groups)]):
+        valid = b"moos-runtime:x:123:123::/var/lib/moos:/usr/sbin/nologin\n"
+        cases = (
+            (valid, b"moos-runtime\n", b"moos-runtime\n", b"moos-runtime L 01/01/2026 0 99999 7 -1\n", "present"),
+            (valid.replace(b"/usr/sbin", b"/sbin"), b"moos-runtime", b"moos-runtime", b"moos-runtime LK", "present"),
+            (valid.replace(b"/var/lib/moos", b"/srv/moos"), b"moos-runtime", b"moos-runtime", b"moos-runtime L", "unsafe"),
+            (valid.replace(b"/usr/sbin/nologin", b"/usr/bin/nologin"), b"moos-runtime", b"moos-runtime", b"moos-runtime L", "unsafe"),
+            (valid, b"wrong-group", b"wrong-group", b"moos-runtime L", "unsafe"),
+            (valid, b"moos-runtime", b"moos-runtime extra", b"moos-runtime L", "unsafe"),
+            (valid, b"moos-runtime", b"moos-runtime", b"moos-runtime P", "unsafe"),
+        )
+        for fields, primary, groups, password, expected in cases:
+            with self.subTest(expected=expected, fields=fields, groups=groups, password=password), \
+                    patch.object(probe, "command", side_effect=[
+                        (0, fields), (0, primary), (0, groups), (0, password)
+                    ]) as command:
                 self.assertEqual(probe.runtime_account(), expected)
+                expected_commands = [["getent", "passwd", "moos-runtime"]]
+                if b"/var/lib/moos" in fields and fields.rstrip().endswith(
+                        (b"/usr/sbin/nologin", b"/sbin/nologin")):
+                    expected_commands.extend([
+                        ["id", "-gn", "moos-runtime"],
+                        ["id", "-nG", "moos-runtime"],
+                        ["passwd", "-S", "moos-runtime"],
+                    ])
+                self.assertEqual([call.args[0] for call in command.call_args_list], expected_commands)
+
+        for result in ((2, b""), (1, b"denied")):
+            with patch.object(probe, "command", return_value=result):
+                self.assertEqual(probe.runtime_account(), "missing" if result[0] == 2 else "unknown")
+        with patch.object(probe, "command", side_effect=[(0, b"broken")]):
+            self.assertEqual(probe.runtime_account(), "unknown")
+        with patch.object(probe, "command", side_effect=[(0, valid), (0, b"moos-runtime"),
+                                                          (0, b"moos-runtime"), (1, b"")]):
+            self.assertEqual(probe.runtime_account(), "unknown")
 
     def test_public_key_parser_with_ephemeral_test_identity(self):
         # Test-only identity stays in memory, is never printed or installed.

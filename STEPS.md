@@ -389,8 +389,11 @@ simulator build/test job and the new unsigned device job. The device log records
 the `Release-iphoneos` product, `arm64-apple-ios17.0` target, and `platform IOS`;
 the uploaded `MOOS-unsigned-iphoneos-arm64` artifact contains `MOOS.ipa` with
 the standard `Payload/MOOSApp.app` layout.
-The workflow uses `macos-15`, Xcode 16.4, an iPhone 16 / iOS 18.5 simulator,
-`build-for-testing`, and `test-without-building` with code signing disabled. A
+The workflow uses `macos-15`, Xcode 16.4, and a compatible installed iPhone
+simulator selected by UDID, preferring iPhone 16 / iOS 18.5 when available.
+It may create a device from an already installed iOS 17.0-or-newer runtime but
+does not download runtimes. `build-for-testing` and `test-without-building` run
+against the same selected UDID with code signing disabled. A
 separate Release build uses `iphoneos`, a generic iOS-device destination, and
 an explicit arm64 architecture; `lipo`, `vtool`, and the app's platform metadata
 must all confirm a physical-device product before `Payload/MOOSApp.app` is
@@ -466,8 +469,10 @@ compilation because the hosted runner did not provide the requested `iPhone 16`
 / `iOS 18.5` destination. The subsequent documentation-only commit `d96f917`
 completed the iOS workflow successfully (simulator/unit tests and unsigned
 device job; run `33990323811`) and its Gateway check passed (run `33990323853`).
-The effective current checks are green; the earlier failure was runner-image
-drift, not a product failure.
+The workflow now discovers installed compatible simulators instead of requiring
+that exact destination and fails if no compatible installed runtime/device type
+can be used. Local Linux verifies the selection policy; real selection and
+Xcode execution remain macOS CI evidence.
 
 ## Operator UX foundation — 2026-09-06
 

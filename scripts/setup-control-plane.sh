@@ -32,7 +32,7 @@ UNIT_ROOT='/etc/systemd/system'
 DOC_ROOT='/usr/share/doc/moos'
 DAEMON_VERSION='MOOS control daemon 1'
 MANIFEST_RELATIVE='configs/control-plane-manifest.sha256'
-MANIFEST_SHA256='f64f77d654d7965f8435d36cc7de8e7c8fb533277450d659efface670c450abf'
+MANIFEST_SHA256='99ae49ec2af0cd1bf00b9f484e10f90db4a28adb20b8b5b57de5321bd1b3f7ca'
 DRY_RUN=0
 
 usage() {

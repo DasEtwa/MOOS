@@ -20,8 +20,11 @@ https://dasetwa.github.io/MOOS/ios/source.json
 
 The source lists the immutable `MOOS.ipa` asset from `ios-v0.1.3` first. The
 release workflow for `ios-v0.1.3` passed. An earlier post-merge default-branch
-run had a hosted-runner destination failure before simulator compilation, but
-the subsequent documentation-only commit `d96f917` passed both iOS jobs.
+run had a hosted-runner destination failure before simulator compilation, while
+another run of the same workflow shape succeeded. CI now prefers that original
+destination when present and otherwise selects a compatible installed iPhone
+simulator by UDID. It does not download simulator runtimes and fails if none is
+compatible.
 
 ## Release architecture
 

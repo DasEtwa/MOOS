@@ -395,17 +395,22 @@ class HostProbe:
         except OSError:
             return False
 
-    def trusted_file(self, name: str) -> str:
+    def trusted_file(self, name: str, *, required_mode: int = 0,
+                     required_parent_mode: int = 0) -> str:
         """Metadata only, not proof of authenticity; never inspect private files."""
         path = Path(name)
         try:
             for parent in reversed(path.parents):
                 metadata = parent.lstat()
-                if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0 or metadata.st_mode & 0o022:
+                if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0
+                        or metadata.st_mode & 0o022
+                        or stat.S_IMODE(metadata.st_mode) & required_parent_mode
+                        != required_parent_mode):
                     return "unsafe"
             metadata = path.lstat()
             if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0
-                    or metadata.st_mode & 0o022 or metadata.st_nlink != 1):
+                    or metadata.st_mode & 0o022 or metadata.st_nlink != 1
+                    or stat.S_IMODE(metadata.st_mode) & required_mode != required_mode):
                 return "unsafe"
             return "present"
         except FileNotFoundError:
@@ -414,6 +419,8 @@ class HostProbe:
             return "unknown"
 
     def runtime_account(self) -> str:
+        # Keep this fail-closed contract aligned with scripts/run-instance.sh:
+        # a partially checked runtime identity must never be reported ready.
         result = self.command(["getent", "passwd", "moos-runtime"])
         if result is None:
             return "unknown"
@@ -426,12 +433,22 @@ class HostProbe:
             if len(fields) != 7 or fields[0] != "moos-runtime":
                 return "unknown"
             uid, gid = int(fields[2]), int(fields[3])
-            if uid <= 0 or gid <= 0 or Path(fields[6]).name != "nologin":
+            if (uid <= 0 or gid <= 0 or fields[5] != "/var/lib/moos"
+                    or fields[6] not in {"/usr/sbin/nologin", "/sbin/nologin"}):
                 return "unsafe"
-            groups = self.command(["id", "-G", "moos-runtime"])
-            if groups is None or groups[0] != 0:
+            primary_group = self.command(["id", "-gn", "moos-runtime"])
+            groups = self.command(["id", "-nG", "moos-runtime"])
+            password = self.command(["passwd", "-S", "moos-runtime"])
+            if any(value is None or value[0] != 0
+                   for value in (primary_group, groups, password)):
                 return "unknown"
-            if {int(group) for group in groups[1].split()} != {gid}:
+            if (primary_group[1].decode("ascii").strip() != "moos-runtime"
+                    or groups[1].decode("ascii").strip() != "moos-runtime"):
+                return "unsafe"
+            password_fields = password[1].decode("ascii").strip().split()
+            if len(password_fields) < 2 or password_fields[0] != "moos-runtime":
+                return "unknown"
+            if password_fields[1] not in {"L", "LK"}:
                 return "unsafe"
             return "present"
         except (ValueError, UnicodeError):
@@ -572,7 +589,8 @@ def collect_checks(probe: HostProbe, socket_path: Path, *, remote: bool = False,
     add("dependencies", "Runtime", "issue" if missing else "ok",
         "Missing Host tools: " + ", ".join(missing) if missing else "Required operator/runtime tools are installed",
         "Ask the administrator to install these tools using the OS package manager." if missing else "")
-    runner = probe.trusted_file("/usr/lib/moos/run-qemu.sh")
+    runner = probe.trusted_file(
+        "/usr/lib/moos/run-qemu.sh", required_mode=0o555, required_parent_mode=0o111)
     add("runtime", "Runtime", "ok" if runner == "present" else "issue" if runner in {"missing", "unsafe"} else "unknown",
         "Installed runtime launcher metadata is intact" if runner == "present" else "Runtime launcher is missing, unsafe, or inaccessible",
         "" if runner == "present" else "Run moos setup --explain local; the administrator must install the authenticated runtime.")
@@ -591,13 +609,13 @@ def collect_checks(probe: HostProbe, socket_path: Path, *, remote: bool = False,
             "Ask the administrator to inspect the Personal runtime failure; do not restage or delete its image." if personal == "failed" else
             "Run moos start to test launch readiness; stopped does not prove that an image is staged." if personal == "stopped" else
             "Run moos status --human again after the transition." if personal in {"starting", "stopping"} else "Run moos shell for the guest console; release root login remains locked.")
-    add("staging", "Runtime", "info", "Private image staging, account lock and effective runtime limits are not audited",
+    add("staging", "Runtime", "info", "Private image staging and effective runtime limits are not audited",
         "These require administrator validation. A running state alone does not prove guest boot or login health.")
     for id, path, label in (
         ("helper", "/usr/libexec/moos/moos-admin-installer", "Administrator installer"),
         ("trust", "/etc/moos/trust/admin-release.pem", "Release public trust key"),
     ):
-        state = probe.trusted_file(path)
+        state = probe.trusted_file(path, required_mode=0o555 if id == "helper" else 0)
         add(id, "Security / trust", "info" if state == "present" else "unknown" if state == "unknown" else "issue",
             label + (" is present; metadata checks passed" if state == "present" else " is " + state),
             "Authenticity must be established outside the checkout. Run moos setup --explain trust.")

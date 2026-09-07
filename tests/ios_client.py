@@ -138,11 +138,15 @@ def main() -> None:
         "actions/checkout@",
         "persist-credentials: false",
         "python3 tests/ios_client.py",
+        "python3 tests/ios_simulator.py",
+        "scripts/select-ios-simulator.py",
+        "steps.simulator.outputs.udid",
         "CODE_SIGNING_ALLOWED=NO",
         "build-for-testing",
         "test-without-building",
     ):
         assert requirement in workflow_text, f"iOS CI is missing {requirement}"
+    assert "name=iPhone 16,OS=18.5" not in workflow_text
 
     for device_requirement in (
         "build-unsigned-device:",

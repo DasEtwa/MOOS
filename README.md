@@ -125,6 +125,12 @@ A running state does not certify guest boot, guest login, or effective runtime
 limits. Those still need administrator/runtime acceptance. Doctor does not
 read the private device store or infer whether a device is paired.
 
+Runtime-account readiness uses the managed launcher's security contract: the
+fixed home, named primary group, exact non-login shell, absence of supplementary
+groups, and locked password must all be observable and correct. If the current
+user cannot inspect the password status, Doctor reports that check as unknown
+rather than inferring readiness.
+
 The Gateway service and Tailscale connection are checked separately. Service
 activity does not prove remote reachability, correct client pairing, or a
 successful authenticated status request. Use the paired iPhone to verify that

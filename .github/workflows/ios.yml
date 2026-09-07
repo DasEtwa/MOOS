@@ -12,9 +12,11 @@ on:
       - "scripts/build-ios-ipa.sh"
       - "scripts/generate-ios-alt-source.py"
       - "scripts/ios_release_metadata.py"
+      - "scripts/select-ios-simulator.py"
       - "scripts/validate-ios-app.sh"
       - "tests/ios_client.py"
       - "tests/ios_distribution.py"
+      - "tests/ios_simulator.py"
       - "tests/fixtures/gateway-v1-contract.json"
       - "host/moos-gateway/src/auth.rs"
       - "GATEWAY.md"
@@ -27,9 +29,11 @@ on:
       - "scripts/build-ios-ipa.sh"
       - "scripts/generate-ios-alt-source.py"
       - "scripts/ios_release_metadata.py"
+      - "scripts/select-ios-simulator.py"
       - "scripts/validate-ios-app.sh"
       - "tests/ios_client.py"
       - "tests/ios_distribution.py"
+      - "tests/ios_simulator.py"
       - "tests/fixtures/gateway-v1-contract.json"
       - "host/moos-gateway/src/auth.rs"
       - "GATEWAY.md"
@@ -63,7 +67,15 @@ jobs:
         run: python3 tests/ios_client.py
 
       - name: Validate distribution tooling
-        run: python3 tests/ios_distribution.py
+        run: |
+          python3 tests/ios_distribution.py
+          python3 tests/ios_simulator.py
+
+      - name: Select an available iPhone simulator
+        id: simulator
+        run: |
+          SIMULATOR_UDID=$(python3 scripts/select-ios-simulator.py)
+          printf 'udid=%s\n' "$SIMULATOR_UDID" >> "$GITHUB_OUTPUT"
 
       - name: Build for iPhone simulator
         run: |
@@ -71,7 +83,7 @@ jobs:
             -project ios/MOOSApp/MOOSApp.xcodeproj \
             -scheme MOOSApp \
             -configuration Debug \
-            -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.5' \
+            -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
             -derivedDataPath "$RUNNER_TEMP/MOOSDerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
@@ -84,7 +96,7 @@ jobs:
             -project ios/MOOSApp/MOOSApp.xcodeproj \
             -scheme MOOSApp \
             -configuration Debug \
-            -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.5' \
+            -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
             -derivedDataPath "$RUNNER_TEMP/MOOSDerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
