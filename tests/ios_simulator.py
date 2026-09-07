@@ -109,6 +109,26 @@ class SimulatorSelectionTests(unittest.TestCase):
         with self.assertRaises(selector.SimulatorError):
             selector.create_simulator(runtimes, types, runner=fail)
 
+    def test_service_warmup_uses_generic_list_and_does_not_hide_failure(self):
+        calls = []
+
+        def succeed(arguments, **kwargs):
+            calls.append((arguments, kwargs))
+            return subprocess.CompletedProcess(arguments, 0, stdout=None, stderr="")
+
+        selector.warm_simulator_service(runner=succeed)
+        self.assertEqual(calls[0][0], ["xcrun", "simctl", "list"])
+        self.assertIs(calls[0][1]["stdout"], subprocess.DEVNULL)
+        self.assertEqual(calls[0][1]["timeout"], selector.SIMCTL_LIST_TIMEOUT)
+        self.assertNotIn("download", " ".join(calls[0][0]).lower())
+
+        def fail(arguments, **kwargs):
+            return subprocess.CompletedProcess(arguments, 1, stdout=None,
+                                               stderr="service unavailable")
+
+        with self.assertRaisesRegex(selector.SimulatorError, "service unavailable"):
+            selector.warm_simulator_service(runner=fail)
+
 
 if __name__ == "__main__":
     unittest.main()

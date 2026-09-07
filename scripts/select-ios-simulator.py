@@ -150,6 +150,27 @@ def create_simulator(
                          + (f": {suffix}" if suffix else ""))
 
 
+def warm_simulator_service(
+    *,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> None:
+    """Wait for CoreSimulator to finish its first-run catalog discovery."""
+    try:
+        result = runner(
+            ["xcrun", "simctl", "list"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=SIMCTL_LIST_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise SimulatorError("CoreSimulator service warm-up timed out") from error
+    if result.returncode != 0:
+        detail = result.stderr.strip().replace("\n", " ")[:400]
+        raise SimulatorError(f"CoreSimulator service warm-up failed: {detail}")
+
+
 def simctl_json(*arguments: str) -> dict[str, Any]:
     try:
         result = subprocess.run(
@@ -177,6 +198,10 @@ def simctl_json(*arguments: str) -> dict[str, Any]:
 
 def main() -> int:
     try:
+        # Xcode 16+ can race the first start of CoreSimulatorService on a fresh
+        # hosted runner.  The generic list operation waits for its catalog to be
+        # ready before the narrower JSON queries and xcodebuild consume it.
+        warm_simulator_service()
         runtimes = compatible_runtimes(simctl_json("list", "runtimes"))
         if not runtimes:
             raise SimulatorError("no available installed iOS Simulator runtime supports iOS 17.0+")

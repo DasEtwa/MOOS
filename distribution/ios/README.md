@@ -23,8 +23,9 @@ release workflow for `ios-v0.1.3` passed. An earlier post-merge default-branch
 run had a hosted-runner destination failure before simulator compilation, while
 another run of the same workflow shape succeeded. CI now prefers that original
 destination when present and otherwise selects a compatible installed iPhone
-simulator by UDID. It does not download simulator runtimes and fails if none is
-compatible.
+simulator by UDID. Before inspecting the catalog, it waits for the hosted
+runner's CoreSimulator service to complete first-run discovery. It does not
+download simulator runtimes and fails if none is compatible.
 
 ## Release architecture
 

@@ -81,10 +81,12 @@ outside this slice.
 `.github/workflows/ios.yml` selects Xcode 16.4 on a GitHub-hosted `macos-15`
 runner, prefers the existing iPhone 16 / iOS 18.5 simulator, otherwise selects
 an available compatible iPhone, and then runs the unit tests on that same UDID
-without rebuilding. If no device is pre-created, CI may create one only from an
-already installed iOS 17.0-or-newer runtime and installed iPhone device type; it
-never downloads a runtime and fails if no compatible simulator can be used. A
-separate job builds the Release app against the
+without rebuilding. A generic simulator catalog query first waits for the
+hosted runner's CoreSimulator service to finish its first-run discovery. If no
+device is pre-created, CI may create one only from an already installed iOS
+17.0-or-newer runtime and installed iPhone device type; it never downloads a
+runtime and fails if no compatible simulator can be used. A separate job builds
+the Release app against the
 physical-device `iphoneos` SDK with an arm64-only executable, verifies its
 Mach-O platform is `IOS` rather than `IOSSIMULATOR`, and packages
 `Payload/MOOSApp.app` as the `MOOS.ipa` workflow artifact. All build commands
