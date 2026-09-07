@@ -536,7 +536,7 @@ from the checkout. It never executes that file, infers version age, or changes
 installation. Human advice then uses the checkout's relative command. Host
 checks, protocol operations and terminal implementation are unchanged.
 
-Verification: 29 operator tests plus existing CLI, daemon, Protocol contract,
+Verification: 31 operator tests plus existing CLI, daemon, Protocol contract,
 Host regressions, runtime control, isolation, launcher, Personal identity,
 control-plane installer, administrator-release, Gateway auth and Gateway
 integration tests passed. Python compilation, shell syntax, diff checks and an
@@ -556,22 +556,28 @@ sync described above.
 
 ### Trusted first-run onboarding assessment — 2026-09-07
 
-Status: Blocked at the trust/login architecture gate; no installer implemented.
+Status: Architecture proposal recorded; implementation deferred to the next
+trusted-bootstrap slice. No installer is implemented.
 
 `HOST_ONBOARDING.md` records the inspected implementation, a proposed initial
 Ubuntu 24.04 amd64 package boundary, the fixed installed first-run operation,
-and its threat model and required acceptance. Missing inputs are an independently
-authenticated publisher/channel and public trust material, authenticated
-Personal/runtime payload provenance, and a reviewed release-guest login model.
+and its threat model and required acceptance. The implementation must establish
+an independently authenticated publisher/channel and public trust material,
+authenticated Personal/runtime payload provenance, and a reviewed release-guest
+login model. Their absence blocks only operations and acceptance claims that
+depend on them, not safe implementation and verification up to those boundaries.
 The existing release profile remains locked; setup remains diagnostic.
 
 Independent read-only review confirmed these gaps and the stricter task's
-conflict with checkout signing in `tests/admin_release.py`. That harness was
-not run; public-only externally signed test fixtures are required without
-weakening existing verification coverage. No package, account, trust, service,
-credential, release image, Gateway grant or protocol was changed. The existing
-uncommitted operator UX work was preserved. BRAIN/MOOS is absent; synchronize
-its open onboarding prerequisites when it becomes available.
+conflict with checkout signing in `tests/admin_release.py`. The harness now uses
+immutable public-only NIST verification fixtures and runs in Host CI without a
+release private key; signature/tamper checks and the deterministic archive,
+activation and rollback checks pass as separate boundaries. A complete signed
+MOOS-bundle fixture remains external acceptance evidence and must be prepared
+by an independent signing environment. No package, account, trust, service,
+credential, release image, Gateway grant or protocol was changed. BRAIN/MOOS
+is absent; synchronize its open onboarding prerequisites when it becomes
+available.
 
 Verification for this documentation-only assessment: release-profile,
 Protocol-v1 contract, local CLI, control-plane installer, runtime-isolation

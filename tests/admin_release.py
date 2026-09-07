@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import os
 import re
@@ -15,6 +16,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+FIXTURES = REPO_ROOT / "tests/fixtures"
 sys.path.insert(0, str(REPO_ROOT / "host"))
 from moos_admin_installer import (  # noqa: E402
     InstallError,
@@ -46,20 +48,12 @@ def run(*arguments: str | Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def sign(openssl: Path, private_key: Path, bundle: Path, signature: Path) -> None:
-    subprocess.run(
-        [
-            str(openssl),
-            "dgst",
-            "-sha256",
-            "-sign",
-            str(private_key),
-            "-out",
-            str(signature),
-            str(bundle),
-        ],
-        check=True,
-    )
+def read_hex_fixture(name: str) -> bytes:
+    encoded = (FIXTURES / name).read_text(encoding="ascii")
+    compact = "".join(encoded.split())
+    assert re.fullmatch(r"[0-9a-f]+", compact), f"invalid hex fixture: {name}"
+    assert len(compact) % 2 == 0, f"odd-length hex fixture: {name}"
+    return bytes.fromhex(compact)
 
 
 def main() -> int:
@@ -73,10 +67,39 @@ def main() -> int:
     assert 'Path("/usr/libexec/moos/moos-admin-installer")' in helper_source
     assert 'Path("/etc/moos/trust/admin-release.pem")' in helper_source
     assert 'parser.add_argument("--key"' not in helper_source
+    install_source = helper_source[
+        helper_source.index("def install_authenticated_release"):
+        helper_source.index("def parse_args")
+    ]
+    authentication_call = install_source.index(
+        "staged_bundle, digest = authenticate_to_private_files("
+    )
+    extraction_call = install_source.index(
+        "extract_authenticated_bundle(staged_bundle, extracted)"
+    )
+    assert authentication_call < extraction_call
     builder_source = (REPO_ROOT / "scripts/build-admin-release.py").read_text(
         encoding="utf-8"
     )
     assert "--signing-key" not in builder_source
+    public_key = FIXTURES / "nist-rsa-pkcs1v15-sha256-public.pub"
+    vector_message_data = read_hex_fixture(
+        "nist-rsa-pkcs1v15-sha256-message.hex"
+    )
+    vector_signature_data = read_hex_fixture(
+        "nist-rsa-pkcs1v15-sha256-signature.hex"
+    )
+    assert len(vector_message_data) == 128
+    assert len(vector_signature_data) == 256
+    assert hashlib.sha256(vector_message_data).hexdigest() == (
+        "565ff4f36e8bd4a96007ed577f3248b4f9943826d721b417a20bb12c3ae6e874"
+    )
+    assert hashlib.sha256(vector_signature_data).hexdigest() == (
+        "163d8eda000cc67e1af3d9e909731c895fb3c31e186faf2828e803067a89cf6f"
+    )
+    assert hashlib.sha256(public_key.read_bytes()).hexdigest() == (
+        "9804e93d8f3e1c0f8d291ec95b9830de13e966126e5d2d74ecc9c10cd7e58d76"
+    )
     for privileged_script in (
         "scripts/setup-control-plane.sh",
         "scripts/setup-gateway.sh",
@@ -110,47 +133,44 @@ def main() -> int:
             )
         assert first.read_bytes() == second.read_bytes(), "bundle is not deterministic"
 
-        private_key = temporary / "release-private.pem"
-        public_key = temporary / "release-public.pem"
-        signature = temporary / "release.sig"
-        subprocess.run(
-            [
-                str(openssl),
-                "genpkey",
-                "-algorithm",
-                "RSA",
-                "-pkeyopt",
-                "rsa_keygen_bits:2048",
-                "-out",
-                str(private_key),
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=True,
+        vector_message = temporary / "nist-vector-message"
+        vector_message.write_bytes(vector_message_data)
+        vector_signature = temporary / "nist-vector-signature"
+        vector_signature.write_bytes(vector_signature_data)
+        vector_private = temporary / "vector-private"
+        vector_private.mkdir(mode=0o700)
+        authenticated_vector, vector_digest = authenticate_to_private_files(
+            vector_message,
+            vector_signature,
+            public_key,
+            vector_private,
+            openssl=openssl,
         )
-        subprocess.run(
-            [
-                str(openssl),
-                "pkey",
-                "-in",
-                str(private_key),
-                "-pubout",
-                "-out",
-                str(public_key),
-            ],
-            stdout=subprocess.DEVNULL,
-            check=True,
-        )
-        sign(openssl, private_key, first, signature)
+        assert authenticated_vector.read_bytes() == vector_message_data
+        assert vector_digest == hashlib.sha256(vector_message_data).hexdigest()
 
-        private = temporary / "private"
-        private.mkdir(mode=0o700)
-        authenticated, _ = authenticate_to_private_files(
-            first, signature, public_key, private, openssl=openssl
+        tampered_vector = temporary / "tampered-vector-message"
+        tampered_vector.write_bytes(
+            vector_message_data[:-1] + bytes([vector_message_data[-1] ^ 1])
         )
+        rejected_vector = temporary / "rejected-vector"
+        rejected_vector.mkdir()
+        try:
+            authenticate_to_private_files(
+                tampered_vector,
+                vector_signature,
+                public_key,
+                rejected_vector,
+                openssl=openssl,
+            )
+        except InstallError as error:
+            assert "signature verification failed" in str(error)
+        else:
+            raise AssertionError("tampered public verification vector was accepted")
+
         extracted = temporary / "extracted"
         extracted.mkdir()
-        extract_authenticated_bundle(authenticated, extracted)
+        extract_authenticated_bundle(first, extracted)
         extracted_files = {
             str(path.relative_to(extracted))
             for path in extracted.rglob("*")
@@ -162,7 +182,7 @@ def main() -> int:
         current = temporary / "current"
         invalid_digest_extract = temporary / "extracted-invalid-digest"
         invalid_digest_extract.mkdir()
-        extract_authenticated_bundle(authenticated, invalid_digest_extract)
+        extract_authenticated_bundle(first, invalid_digest_extract)
         try:
             activate_extracted_release(
                 invalid_digest_extract,
@@ -186,7 +206,7 @@ def main() -> int:
 
         repeated = temporary / "repeated"
         repeated.mkdir()
-        extract_authenticated_bundle(authenticated, repeated)
+        extract_authenticated_bundle(first, repeated)
         assert activate_extracted_release(
             repeated,
             "a" * 64,
@@ -199,7 +219,7 @@ def main() -> int:
         symlinked_target.symlink_to(final)
         symlinked_extract = temporary / "extracted-symlink"
         symlinked_extract.mkdir()
-        extract_authenticated_bundle(authenticated, symlinked_extract)
+        extract_authenticated_bundle(first, symlinked_extract)
         try:
             activate_extracted_release(
                 symlinked_extract,
@@ -218,7 +238,7 @@ def main() -> int:
         for digest in ("b" * 64, "c" * 64, "d" * 64):
             next_extracted = temporary / f"extracted-{digest[0]}"
             next_extracted.mkdir()
-            extract_authenticated_bundle(authenticated, next_extracted)
+            extract_authenticated_bundle(first, next_extracted)
             final = activate_extracted_release(
                 next_extracted,
                 digest,
@@ -235,47 +255,25 @@ def main() -> int:
         assert not (releases / ("a" * 64)).exists()
         assert not (releases / ("b" * 64)).exists()
 
-        tampered = temporary / "tampered.tar"
-        tampered.write_bytes(
-            first.read_bytes()[:-1] + bytes([first.read_bytes()[-1] ^ 1])
-        )
-        rejected = temporary / "rejected"
-        rejected.mkdir()
-        try:
-            authenticate_to_private_files(
-                tampered, signature, public_key, rejected, openssl=openssl
-            )
-        except InstallError as error:
-            assert "signature verification failed" in str(error)
-        else:
-            raise AssertionError("tampered release passed signature verification")
-
         malicious = temporary / "malicious.tar"
         with tarfile.open(malicious, mode="w", format=tarfile.USTAR_FORMAT) as archive:
             member = tarfile.TarInfo("scripts/setup-control-plane.sh")
             member.type = tarfile.SYMTYPE
             member.linkname = "/bin/sh"
             archive.addfile(member, io.BytesIO())
-        malicious_signature = temporary / "malicious.sig"
-        sign(openssl, private_key, malicious, malicious_signature)
-        malicious_private = temporary / "malicious-private"
-        malicious_private.mkdir()
-        authenticated_malicious, _ = authenticate_to_private_files(
-            malicious, malicious_signature, public_key, malicious_private, openssl=openssl
-        )
         malicious_extract = temporary / "malicious-extract"
         malicious_extract.mkdir()
         try:
-            extract_authenticated_bundle(authenticated_malicious, malicious_extract)
+            extract_authenticated_bundle(malicious, malicious_extract)
         except InstallError as error:
             assert "unsafe" in str(error) or "incomplete" in str(error)
         else:
             raise AssertionError("unsafe authenticated archive was extracted")
 
     print("MOOS administrator release trust-boundary test: PASS")
-    print("  checkout bytes: opaque-copied and signature-verified before archive parsing")
+    print("  NIST public vector: opaque-copied and signature-verified; tamper rejected")
     print("  archive: deterministic, exact allowlist, regular files only")
-    print("  tampered signature and authenticated symlink archive: rejected")
+    print("  malicious symlink archive: rejected")
     print("  documentation: no privileged checkout entry point")
     return 0
 

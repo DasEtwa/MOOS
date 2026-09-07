@@ -43,5 +43,6 @@ jobs:
           python3 tests/qemu_launcher.py
           python3 tests/personal_identity.py
           python3 tests/host_regressions.py
+          python3 tests/admin_release.py
       # Real QEMU builds and privileged systemd acceptance are explicit local
       # checks documented in ISSUE_FIXES.md; this job never installs MOOS services.

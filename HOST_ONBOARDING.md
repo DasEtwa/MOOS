@@ -10,9 +10,9 @@ unsigned package as a completed installation.
 
 ## Observed prerequisites, 2026-09-07
 
-Inspection used the `Low-bugs` working tree at the 2026-09-07 review point,
-including the operator UX changes in this checkout. Those changes are not a
-published Host distribution.
+Inspection reflects the repository implementation and tests reviewed on
+2026-09-07, including the merged operator UX stabilization. That repository
+state is not a published Host distribution.
 
 | Requirement | Current implementation | Missing acceptance |
 | --- | --- | --- |
@@ -114,19 +114,21 @@ setup must explicitly say that release shell access is unavailable.
 | Credential leakage | Curated diagnostics, no raw credential-store reads or pairing secrets in reports/logs. |
 | Remote privilege expansion | Tailscale remains optional transport; preserve per-device authentication, revocation, and status-only Gateway/daemon enforcement. |
 
-`tests/admin_release.py` currently generates `release-private.pem` and invokes
-signing from checkout test code. It remains existing trust-boundary regression
-coverage, but is not evidence that the proposed onboarding private-key gate is
-solved. Replace its signing fixture workflow with externally prepared public
-verification fixtures and signed immutable test artifacts before claiming that
-gate as complete. Do not merely remove signature, tamper, or authenticated-
-archive coverage.
+`tests/admin_release.py` uses immutable NIST public verification material and no
+private signing identity. Valid and tampered signature handling, deterministic
+archive creation, extraction, activation, rollback and malicious-member
+rejection remain covered. A future signed MOOS administrator-bundle fixture
+must be prepared in the independent signing environment before claiming the
+complete end-to-end publisher fixture gate; checkout tooling must never create
+it. The existing public-vector and archive tests do not substitute for that
+external acceptance evidence.
 
 The implementation gate requires the publisher/channel trust input, an
 authenticated Personal/runtime distribution design, and a reviewed guest-login
-contract. The repository's AGENTS.md explicitly stops work when a required
-trust anchor is missing or a larger architectural decision is needed. No new
-trust architecture is established by this proposal.
+contract. Missing external trust material blocks only operations and acceptance
+that require it; it does not block implementing the missing bootstrap capability
+or verified work up to that boundary. No new trust architecture is established
+by this proposal.
 
 ## Required evidence before completion
 
