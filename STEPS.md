@@ -571,13 +571,14 @@ The existing release profile remains locked; setup remains diagnostic.
 Independent read-only review confirmed these gaps and the stricter task's
 conflict with checkout signing in `tests/admin_release.py`. The harness now uses
 immutable public-only NIST verification fixtures and runs in Host CI without a
-release private key; signature/tamper checks and the deterministic archive,
-activation and rollback checks pass as separate boundaries. A complete signed
-MOOS-bundle fixture remains external acceptance evidence and must be prepared
-by an independent signing environment. No package, account, trust, service,
-credential, release image, Gateway grant or protocol was changed. BRAIN/MOOS
-is absent; synchronize its open onboarding prerequisites when it becomes
-available.
+release private key. An immutable externally signed MOOS test bundle additionally
+requires the current deterministic archive to match its signed bytes before the
+archive passes through opaque staging, authentication and extraction. Tamper,
+archive, activation and rollback checks remain covered. This test fixture is not
+production publisher/channel or real Host acceptance evidence. No package,
+account, trust, service, credential, release image, Gateway grant or protocol
+was changed. BRAIN/MOOS is absent; synchronize its open onboarding prerequisites
+when it becomes available.
 
 Verification for this documentation-only assessment: release-profile,
 Protocol-v1 contract, local CLI, control-plane installer, runtime-isolation

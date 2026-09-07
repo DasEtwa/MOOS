@@ -55,16 +55,21 @@ openssl dgst -sha256 -sign /secure/moos-admin-release-private.pem \
   -out moos-admin-release.tar.sig moos-admin-release.tar
 ~~~
 
-Only the public key is provisioned on a MOOS host. Private keys, signatures,
-and provisioning credentials are not committed to this repository.
+Only the public key is provisioned on a MOOS host. Private keys, production
+release signatures, and provisioning credentials are not committed to this
+repository. Immutable public non-production test-vector and fixture signatures
+are the explicit test-only exception documented below.
 
 The production verification path is tested without creating a signing identity
 in the checkout. `tests/admin_release.py` uses an immutable public NIST
-signature-verification vector for valid/tampered signature handling and tests
-the deterministic MOOS archive allowlist, extraction, activation, rollback and
-malicious-member rejection separately. A future end-to-end signed MOOS bundle
-fixture must be prepared in the independent signing environment and may return
-only with its public verification material and signature.
+signature-verification vector plus an immutable externally signed MOOS test
+bundle. A newly generated test bundle must match that fixture byte for byte
+before its detached signature is used. The generated bundle then passes through
+opaque staging and authentication, and only the returned staged copy is parsed.
+Tamper rejection, the archive allowlist, activation, rollback and malicious-
+member rejection remain covered. The fixture contains only its archive,
+signature and public key; its non-production private key was destroyed in the
+independent signing environment.
 
 ## Authenticate and install
 
