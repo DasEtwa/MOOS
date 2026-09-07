@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Test the local CLI against a temporary typed moosd socket."""
 
+import ast
 import json
 import os
 import socket
@@ -97,8 +98,53 @@ def main():
         terminal = run_cli(socket_path, "personal", "terminal", input_text="")
         assert terminal.returncode == 0, terminal.stderr
 
+        for command, expected in (("start", "starting"), ("stop", "stopped")):
+            alias = run_cli(socket_path, command)
+            assert alias.returncode == 0, alias.stderr
+            assert alias.stdout.strip() == f"Personal MOOS: {expected}"
+        shell_alias = run_cli(socket_path, "shell", input_text="")
+        assert shell_alias.returncode == 0, shell_alias.stderr
+        human = run_cli(socket_path, "status", "--human")
+        assert human.returncode == 0 and human.stdout.strip() == "Personal MOOS: running"
+        explicit_status = run_cli(socket_path, "personal", "status")
+        assert json.loads(explicit_status.stdout)["personal"]["state"] == "running"
+        for arguments in (("help",), (), ("--help",)):
+            help_result = run_cli(socket_path, *arguments)
+            assert help_result.returncode == 0
+            for command in ("setup", "doctor", "start", "stop", "shell"):
+                assert "moos " + command in help_result.stdout
+        for arguments in (("doctor", "--fix"), ("status", "--report"),
+                          ("help", "start"), ("status", "--remote"),
+                          ("doctor", "--expect-fingerprint", "bad"), ("setup", "start"),
+                          ("doctor", "--verbose", "--report"), ("status", "--verbose")):
+            invalid_args = run_cli(socket_path, *arguments)
+            assert invalid_args.returncode == 2
+        no_color_help = run_cli(socket_path, "help", "--no-color")
+        assert no_color_help.returncode == 0
+        assert "\x1b" not in no_color_help.stdout
+        for command in ("start", "stop", "shell"):
+            unavailable = run_cli(Path(temporary) / "absent.sock", command, input_text="")
+            assert unavailable.returncode == 1
+            assert "[NEEDS ATTENTION]" in unavailable.stderr
+            assert "absent.sock" not in unavailable.stderr
+            assert "moos doctor" in unavailable.stderr
+        for topic in ("trust", "local", "remote"):
+            guide = run_cli(socket_path, "setup", "--explain", topic)
+            assert guide.returncode == 0 and len(guide.stdout) > 100
+
         direct_qemu = REPO_ROOT / "scripts" / "run-qemu.sh"
-        assert "run-qemu" not in Path(REPO_ROOT / "scripts/moos").read_text()
+        # Diagnosis may inspect launcher metadata, but its subprocess probes
+        # must stay read-only; lifecycle aliases are exercised above via moosd.
+        tree = ast.parse(Path(REPO_ROOT / "scripts/moos").read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "command":
+                assert isinstance(node.args[0], ast.List)
+                verb = ast.literal_eval(node.args[0].elts[0])
+                assert verb in {"systemctl", "getent", "id", "passwd", "tailscale"}, verb
+                action = ast.literal_eval(node.args[0].elts[1])
+                assert (verb, action) in {("systemctl", "show"), ("getent", "passwd"),
+                                          ("id", "-gn"), ("id", "-nG"),
+                                          ("passwd", "-S"), ("tailscale", "status")}
         assert direct_qemu.exists()
 
         fragmented_path = Path(temporary) / "fragmented.sock"

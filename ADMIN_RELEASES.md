@@ -97,3 +97,35 @@ those paths come from the authenticated administrator release.
 
 Never replace these commands with `sudo ./scripts/...` or `sudo python3
 tests/...` from a checkout.
+
+## Operator onboarding and signing identities
+
+`moos setup` and `moos doctor` inspect this boundary without changing it.
+`moos setup --explain trust` explains the user/publisher distinction even on an
+unprovisioned Host. Missing helper, public key, or active release is surfaced
+as an installation step requiring an administrator, not an invitation to run
+checkout scripts as root. There is no automatic OS-package bootstrap in this
+repository yet.
+
+A Host operator consumes signed releases and needs only the public key.
+A release publisher must deliberately choose between creating a new RSA/ECDSA
+identity and importing an existing identity in the isolated trusted signing
+environment. Use that environment's trusted key-management tools, keep the
+private key and its backup there, and export only the public key. Setup does
+not accept a private-key path, create/import keys, search for a missing key,
+or regenerate an identity. Provisioning the helper and public key remains an
+independently authenticated administrator action.
+
+With trusted tooling in that environment, obtain the public-key fingerprint:
+
+```sh
+openssl pkey -pubin -in admin-release-public.pem -outform DER | openssl dgst -sha256
+```
+
+Transfer the 64 hexadecimal digits through a separate trusted channel, then
+compare on the Host with `moos doctor --expect-fingerprint HEX_DIGITS`.
+A mismatch is a stop point for release installation. Doctor neither replaces
+the key nor determines the authenticity of the helper. Its file/parent
+ownership and mode checks and active-release pointer check are observations,
+not signature revalidation or permission to install. The diagnostic report
+omits even the public fingerprint and never reads the private device store.

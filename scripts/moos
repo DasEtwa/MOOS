@@ -4,6 +4,17 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import ipaddress
+import platform
+import re
+import selectors
+import shutil
+import stat
+import subprocess
+import time
+import textwrap
+from dataclasses import asdict, dataclass
 import codecs
 import signal
 import termios
@@ -48,18 +59,76 @@ DEFAULT_SOCKET = Path("/run/moos/moosd.sock")
 READ_BYTES = 4096
 
 
+HELP = """MOOS — tiny. green. alive.
+
+Personal MOOS is your small Linux home on this computer.
+
+  moos setup            See what is ready and what to do next
+  moos doctor           Find out what needs attention
+  moos status --human   See whether Personal MOOS is running
+  moos start            Start Personal MOOS
+  moos stop             Stop Personal MOOS
+  moos shell            Open Personal MOOS's console (login required)
+  moos help             Show this guide
+
+New here? Start with moos setup. These checks do not change your settings.
+Your iPhone can view status; start, stop and shell work on this computer.
+Guest login details: moos setup --explain local
+
+For scripts: moos status returns JSON; moos doctor --report returns a JSON report.
+Explicit forms remain: moos personal status|start|stop|terminal.
+More detail: moos doctor --verbose. Plain text: --no-color (or NO_COLOR).
+"""
+
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="moos")
-    parser.add_argument("--socket", type=Path, default=DEFAULT_SOCKET)
-    parser.add_argument("command", choices=("status", "personal"))
+    parser = argparse.ArgumentParser(
+        prog="moos", description=HELP,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--socket", type=Path, default=DEFAULT_SOCKET,
+                        help="advanced: select the local control socket")
+    parser.add_argument("command", nargs="?", default="help", choices=(
+        "setup", "doctor", "help", "status", "start", "stop", "shell", "personal"))
     parser.add_argument("action", nargs="?", choices=("status", "start", "stop", "terminal"))
-    return parser.parse_args()
+    parser.add_argument("--human", action="store_true", help="readable lifecycle/status output")
+    parser.add_argument("--verbose", action="store_true", help="setup/doctor: show individual technical observations")
+    parser.add_argument("--no-color", action="store_true", help="use plain text status labels without emoji")
+    parser.add_argument("--report", action="store_true", help="doctor: curated JSON, no raw diagnostics")
+    parser.add_argument("--remote", action="store_true", help="setup/doctor: require remote status checks")
+    parser.add_argument("--non-interactive", action="store_true", help="setup: do not prompt; local by default")
+    parser.add_argument("--explain", choices=("trust", "local", "remote"), help="setup: explain a next step")
+    parser.add_argument("--expect-fingerprint", type=fingerprint_argument,
+                        help="setup/doctor: expected public-key SHA-256 DER fingerprint from a trusted source")
+    args = parser.parse_args()
+    diagnostic = args.command in {"setup", "doctor"}
+    if args.action is not None and args.command != "personal":
+        parser.error("only personal accepts an action")
+    if (args.remote or args.expect_fingerprint) and not diagnostic:
+        parser.error("--remote and --expect-fingerprint require setup or doctor")
+    if args.verbose and not diagnostic:
+        parser.error("--verbose requires setup or doctor")
+    if args.verbose and args.report:
+        parser.error("choose --verbose for text or --report for JSON")
+    if args.report and args.command != "doctor":
+        parser.error("--report requires doctor")
+    if (args.explain or args.non_interactive) and args.command != "setup":
+        parser.error("--explain and --non-interactive require setup")
+    if args.human and args.command not in {"status", "personal", "start", "stop"}:
+        parser.error("--human requires a status or lifecycle command")
+    return args
+
+
+def fingerprint_argument(value: str) -> str:
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", value):
+        raise argparse.ArgumentTypeError("use exactly 64 hexadecimal SHA-256 digits")
+    return value.lower()
 
 
 def operation_for(args: argparse.Namespace) -> str:
+    if args.command in {"start", "stop"}:
+        return f"personal.{args.command}"
     if args.command == "status":
-        if args.action is not None:
-            raise ValueError("status does not accept an action")
         return "status"
     if args.action is None:
         raise ValueError("personal requires status, start, stop, or terminal")
@@ -70,6 +139,7 @@ def _receive_frame(
     connection: ByteTransport,
     decoder: FrameDecoder,
     pending: deque[FrameResult],
+    deadline: float | None = None,
 ) -> dict:
     while True:
         while pending:
@@ -77,6 +147,11 @@ def _receive_frame(
             if result.error is not None or result.frame is None:
                 raise ValueError("daemon sent an invalid protocol frame")
             return result.frame
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("control response timed out")
+            connection.settimeout(remaining)
         data = connection.recv(READ_BYTES)
         if not data:
             final = decoder.finish()
@@ -86,13 +161,15 @@ def _receive_frame(
         pending.extend(decoder.feed(data))
 
 
-def request(socket_path: Path, operation: str) -> ControlSuccess | ControlFailure:
+def request(socket_path: Path, operation: str, *, timeout: float | None = None) -> ControlSuccess | ControlFailure:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        deadline = time.monotonic() + timeout if timeout is not None else None
+        connection.settimeout(timeout)
         connection.connect(str(socket_path))
         connection.sendall(
             encode_frame(make_control_request(operation))
         )
-        frame = _receive_frame(connection, FrameDecoder(), deque())
+        frame = _receive_frame(connection, FrameDecoder(), deque(), deadline)
         return parse_control_response(frame, expected_operation=operation)
 
 
@@ -189,13 +266,666 @@ def _terminal(socket_path: Path) -> int:
                         return 1
 
 
+# Keep operator checks in the existing installed client: no new privileged
+# bundle member or import is needed. Probes never authorize an installation.
+@dataclass(frozen=True)
+class Check:
+    id: str
+    area: str
+    state: str  # ok, issue, unknown, info
+    summary: str
+    next_step: str = ""
+
+
+GUIDES = {
+    "trust": """Release trust — who may install MOOS Host components?
+
+As a MOOS user, you need a trusted public key and installer, not a private key.
+Ask your administrator or release provider to provision both through an
+independently authenticated OS package or administrator-controlled channel:
+  /usr/libexec/moos/moos-admin-installer
+  /etc/moos/trust/admin-release.pem
+Verify the public-key fingerprint through a separate trusted channel.
+There is currently no packaged, automatic first-install bootstrap in this repo.
+Do not run checkout installers with sudo or copy them into trusted paths.
+
+If you publish your own releases, create a new RSA/ECDSA signing identity or
+import your existing identity ONLY in an isolated, trusted signing environment.
+Use that environment's trusted key-management tooling; keep the private key
+there and back it up securely. Never give the key to MOOS checkout tooling.
+Export only the public key for independent Host provisioning. Have the exact
+reviewed bundle signed there, then use the provisioned installer to verify it.
+Missing or mismatched trust is a stop point; do not replace keys automatically.
+
+Administrator procedure: ADMIN_RELEASES.md, Build and sign / Authenticate and install.
+Compare a trusted SHA-256 fingerprint of the DER public key with:
+  moos doctor --expect-fingerprint <64 hexadecimal digits>
+This compares the public key only; the helper's authenticity still requires
+independent provisioning. Setup never creates, imports, or searches for keys.
+""",
+    "local": """Local MOOS — the next installation steps
+
+Installation and access for your account need an administrator-authorized step.
+If you manage this computer, follow the administrator procedure below; otherwise
+ask the person who manages it. Setup does not grant itself permission.
+For a missing Host requirement, moos doctor --verbose lists the exact checks.
+First complete release trust: moos setup --explain trust
+Then ask the administrator to use the authenticated release, in this order:
+  1. Install the locked runtime account and fixed runtime launcher.
+  2. Stage the Personal guest image and QEMU runtime.
+  3. Install/activate the local control component.
+  4. Explicitly grant your trusted local account moos-control membership.
+     This permits Personal start/stop and its guest console. Log in again.
+The exact commands are in ADMIN_RELEASES.md, Authenticate and install.
+Existing images are never overwritten by onboarding.
+
+Run moos doctor again, then moos start and moos status --human.
+moos shell opens the guest console; release images have root login locked.
+A usable release guest login is not provisioned by this onboarding pass.
+The blank root login belongs only to the explicitly selected local development
+image. Do not switch images or weaken login policy to get past this step.
+""",
+    "remote": """Remote status — optional, through Tailscale
+
+Install Tailscale on the Host and iPhone using your OS package manager or the
+provider's official instructions: https://tailscale.com/download
+Connect both to the intended tailnet using Tailscale's own sign-in flow.
+MOOS does not install it, sign in for you, or handle Tailscale credentials.
+Ask the administrator to install the Gateway from the authenticated MOOS
+release and allow only the intended clients/port in the tailnet ACL.
+See GATEWAY.md, Install and pair an iPhone, for the administrator procedure.
+
+Pair each physical device separately with the existing administrator tool.
+Transfer its one-time pairing code privately to Add Host in the iOS app.
+Never paste that code into diagnostics, logs, or support reports.
+Tailscale connectivity is not MOOS authentication. The iPhone must authenticate
+with its own MOOS device key. Remote status is available today; remote start,
+stop and terminal are not. Local use does not need Tailscale or a cloud account.
+""",
+}
+
+
+class HostProbe:
+    """Read-only, bounded OS observations. Output is data, never rendering."""
+
+    def command(self, argv: list[str]) -> tuple[int, bytes] | None:
+        # Fixed search path excludes checkout/user PATH executables. No shell,
+        # inherited command customizations, raw stderr, or credential output.
+        executable = shutil.which(argv[0], path="/usr/sbin:/usr/bin:/sbin:/bin")
+        if executable is None:
+            return None
+        try:
+            with subprocess.Popen(
+                [executable, *argv[1:]], stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C"},
+            ) as process:
+                try:
+                    with selectors.DefaultSelector() as selector:
+                        selector.register(process.stdout, selectors.EVENT_READ)
+                        output = bytearray()
+                        deadline = time.monotonic() + 4
+                        while True:
+                            remaining = deadline - time.monotonic()
+                            if remaining <= 0 or not selector.select(remaining):
+                                return None
+                            chunk = os.read(process.stdout.fileno(), 8192)
+                            if not chunk:
+                                return process.wait(timeout=max(0.01, remaining)), bytes(output)
+                            output.extend(chunk)
+                            if len(output) > 256 * 1024:
+                                return None
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait()
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    def dependency(self, name: str) -> bool:
+        return shutil.which(name, path="/usr/sbin:/usr/bin:/sbin:/bin") is not None
+
+    def host_supported(self) -> bool:
+        return platform.system() == "Linux" and platform.machine() in {"x86_64", "amd64"}
+
+    def controllers(self) -> bool:
+        try:
+            return {"cpu", "memory", "pids", "io"} <= set(
+                Path("/sys/fs/cgroup/cgroup.controllers").read_text().split())
+        except OSError:
+            return False
+
+    def trusted_file(self, name: str, *, required_mode: int = 0,
+                     required_parent_mode: int = 0) -> str:
+        """Metadata only, not proof of authenticity; never inspect private files."""
+        path = Path(name)
+        try:
+            for parent in reversed(path.parents):
+                metadata = parent.lstat()
+                if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0
+                        or metadata.st_mode & 0o022
+                        or stat.S_IMODE(metadata.st_mode) & required_parent_mode
+                        != required_parent_mode):
+                    return "unsafe"
+            metadata = path.lstat()
+            if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0
+                    or metadata.st_mode & 0o022 or metadata.st_nlink != 1
+                    or stat.S_IMODE(metadata.st_mode) & required_mode != required_mode):
+                return "unsafe"
+            return "present"
+        except FileNotFoundError:
+            return "missing"
+        except OSError:
+            return "unknown"
+
+    def runtime_account(self) -> str:
+        # Keep this fail-closed contract aligned with scripts/run-instance.sh:
+        # a partially checked runtime identity must never be reported ready.
+        result = self.command(["getent", "passwd", "moos-runtime"])
+        if result is None:
+            return "unknown"
+        if result[0] == 2:
+            return "missing"
+        if result[0] != 0:
+            return "unknown"
+        try:
+            fields = result[1].decode("ascii").strip().split(":")
+            if len(fields) != 7 or fields[0] != "moos-runtime":
+                return "unknown"
+            uid, gid = int(fields[2]), int(fields[3])
+            if (uid <= 0 or gid <= 0 or fields[5] != "/var/lib/moos"
+                    or fields[6] not in {"/usr/sbin/nologin", "/sbin/nologin"}):
+                return "unsafe"
+            primary_group = self.command(["id", "-gn", "moos-runtime"])
+            groups = self.command(["id", "-nG", "moos-runtime"])
+            password = self.command(["passwd", "-S", "moos-runtime"])
+            if any(value is None or value[0] != 0
+                   for value in (primary_group, groups, password)):
+                return "unknown"
+            if (primary_group[1].decode("ascii").strip() != "moos-runtime"
+                    or groups[1].decode("ascii").strip() != "moos-runtime"):
+                return "unsafe"
+            password_fields = password[1].decode("ascii").strip().split()
+            if len(password_fields) < 2 or password_fields[0] != "moos-runtime":
+                return "unknown"
+            if password_fields[1] not in {"L", "LK"}:
+                return "unsafe"
+            return "present"
+        except (ValueError, UnicodeError):
+            return "unknown"
+
+    def admin_release(self) -> str:
+        link = Path("/usr/lib/moos/admin-current")
+        try:
+            if not link.is_symlink():
+                return "unsafe" if link.exists() else "missing"
+            metadata = link.lstat()
+            target = Path(os.readlink(link))
+            if not target.is_absolute():
+                target = link.parent / target
+            if (metadata.st_uid != 0 or target.parent != Path("/usr/lib/moos/admin-releases")
+                    or not re.fullmatch(r"[0-9a-f]{64}", target.name)):
+                return "unsafe"
+            for path in (link.parent, *link.parent.parents, target, target.parent):
+                metadata = path.lstat()
+                if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0 or metadata.st_mode & 0o022:
+                    return "unsafe"
+            return "present"
+        except FileNotFoundError:
+            return "missing"
+        except OSError:
+            return "unknown"
+
+    def public_fingerprint(self) -> str | None:
+        # Only the fixed public key is parsed, with a bounded no-follow read.
+        path = "/etc/moos/trust/admin-release.pem"
+        if self.trusted_file(path) != "present":
+            return None
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(fd, "rb") as handle:
+                metadata = os.fstat(handle.fileno())
+                if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0
+                        or metadata.st_mode & 0o022 or metadata.st_nlink != 1
+                        or metadata.st_size > 16384):
+                    return None
+                data = handle.read(16385)
+            if len(data) > 16384 or not data.startswith(b"-----BEGIN PUBLIC KEY-----\n"):
+                return None
+            # Match the release contract's RSA/ECDSA algorithms. Both tools
+            # emit SubjectPublicKeyInfo DER, as openssl pkey -pubin does.
+            for algorithm in ("rsa", "ec"):
+                result = subprocess.run(
+                    ["/usr/bin/openssl", algorithm, "-pubin", "-outform", "DER"],
+                    input=data, capture_output=True, timeout=4, check=False,
+                    env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+                )
+                if result.returncode == 0 and 0 < len(result.stdout) <= 16384:
+                    return hashlib.sha256(result.stdout).hexdigest()
+            return None
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    def service(self, name: str) -> str:
+        result = self.command(["systemctl", "show", name, "--property=LoadState", "--property=ActiveState"])
+        if result is None or result[0] != 0:
+            return "unknown"
+        try:
+            properties = dict(line.split("=", 1) for line in result[1].decode("ascii").splitlines())
+        except (ValueError, UnicodeError):
+            return "unknown"
+        if properties.get("LoadState") == "not-found":
+            return "missing"
+        if properties.get("LoadState") != "loaded":
+            return "unknown"
+        active = properties.get("ActiveState")
+        return active if active in {"active", "inactive", "failed", "activating", "deactivating"} else "unknown"
+
+    def tailscale(self) -> str:
+        if not self.dependency("tailscale"):
+            return "unavailable"
+        result = self.command(["tailscale", "status", "--json"])
+        if result is None or result[0] != 0:
+            return "unknown"
+        return tailscale_state(result[1])
+
+    def personal(self, socket_path: Path) -> str:
+        try:
+            response = request(socket_path, "status", timeout=5.0)
+            if isinstance(response, ControlFailure):
+                return "unknown"
+            return response.data.as_dict()["personal"]["state"]
+        except PermissionError:
+            return "denied"
+        except (FileNotFoundError, ConnectionRefusedError):
+            return "unavailable"
+        except (OSError, ValueError, ConnectionError):
+            return "unknown"
+
+
+def tailscale_state(data: bytes) -> str:
+    try:
+        value = json.loads(data)
+        if not isinstance(value, dict):
+            return "unknown"
+        backend = value.get("BackendState")
+        if backend in {"Stopped", "NeedsLogin", "NeedsMachineAuth"}:
+            return "disconnected"
+        if backend != "Running":
+            return "unknown"
+        addresses = value.get("TailscaleIPs")
+        health = value.get("Health")
+        if health is not None and (not isinstance(health, list) or health):
+            return "unhealthy"
+        if not isinstance(addresses, list) or not addresses:
+            return "unhealthy"
+        networks = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48"))
+        for address in addresses:
+            if not isinstance(address, str) or "%" in address:
+                return "unknown"
+            parsed = ipaddress.ip_address(address)
+            if not any(parsed in network for network in networks):
+                return "unhealthy"
+        return "connected"
+    except (ValueError, TypeError, RecursionError):
+        return "unknown"
+
+
+def collect_checks(probe: HostProbe, socket_path: Path, *, remote: bool = False,
+                   expected_fingerprint: str | None = None) -> list[Check]:
+    checks = []
+    def add(id, area, state, summary, next_step=""):
+        checks.append(Check(id, area, state, summary, next_step))
+
+    supported = probe.host_supported()
+    add("host", "Host", "ok" if supported else "issue",
+        "Linux x86-64 Host detected" if supported else "This Host is outside the supported Linux x86-64 baseline",
+        "" if supported else "Use a Linux x86-64 Host with systemd and unified cgroup v2.")
+    controllers = probe.controllers()
+    add("limits", "Host", "ok" if controllers else "issue",
+        "Required Host resource controllers are available" if controllers else "Required Host resource controllers are unavailable",
+        "" if controllers else "Ask the administrator to enable unified cgroup v2 with CPU, memory, task and I/O controllers.")
+    missing = [name for name in ("python3", "systemctl", "systemd-run", "bwrap", "findmnt", "openssl") if not probe.dependency(name)]
+    add("dependencies", "Runtime", "issue" if missing else "ok",
+        "Missing Host tools: " + ", ".join(missing) if missing else "Required operator/runtime tools are installed",
+        "Ask the administrator to install these tools using the OS package manager." if missing else "")
+    runner = probe.trusted_file(
+        "/usr/lib/moos/run-qemu.sh", required_mode=0o555, required_parent_mode=0o111)
+    add("runtime", "Runtime", "ok" if runner == "present" else "issue" if runner in {"missing", "unsafe"} else "unknown",
+        "Installed runtime launcher metadata is intact" if runner == "present" else "Runtime launcher is missing, unsafe, or inaccessible",
+        "" if runner == "present" else "Run moos setup --explain local; the administrator must install the authenticated runtime.")
+    account = probe.runtime_account()
+    add("account", "Runtime", "ok" if account == "present" else "unknown" if account == "unknown" else "issue",
+        "Runtime account has a non-login shell and no extra groups" if account == "present" else "Runtime account is missing, unsafe, or could not be checked",
+        "" if account == "present" else "Ask the administrator to validate the locked runtime identity using the authenticated release. Run moos setup --explain local.")
+    personal = probe.personal(socket_path)
+    connected = personal in {"running", "stopped", "starting", "stopping", "failed"}
+    add("control", "Personal MOOS", "ok" if connected else "issue" if personal in {"denied", "unavailable"} else "unknown",
+        "Local control is responding" if connected else "Local access is not authorized" if personal == "denied" else "Local control is unavailable or returned an invalid response",
+        "" if connected else "Ask the administrator to grant your local account moos-control access, then log in again." if personal == "denied" else "Run moos setup --explain local; ask the administrator to check the installed local control component.")
+    if connected:
+        add("personal", "Personal MOOS", "issue" if personal == "failed" else "ok",
+            "Personal MOOS is " + personal,
+            "Ask the administrator to inspect the Personal runtime failure; do not restage or delete its image." if personal == "failed" else
+            "Run moos start to test launch readiness; stopped does not prove that an image is staged." if personal == "stopped" else
+            "Run moos status --human again after the transition." if personal in {"starting", "stopping"} else "Run moos shell for the guest console; release root login remains locked.")
+    add("staging", "Runtime", "info", "Private image staging and effective runtime limits are not audited",
+        "These require administrator validation. A running state alone does not prove guest boot or login health.")
+    for id, path, label in (
+        ("helper", "/usr/libexec/moos/moos-admin-installer", "Administrator installer"),
+        ("trust", "/etc/moos/trust/admin-release.pem", "Release public trust key"),
+    ):
+        state = probe.trusted_file(path, required_mode=0o555 if id == "helper" else 0)
+        add(id, "Security / trust", "info" if state == "present" else "unknown" if state == "unknown" else "issue",
+            label + (" is present; metadata checks passed" if state == "present" else " is " + state),
+            "Authenticity must be established outside the checkout. Run moos setup --explain trust.")
+    if probe.trusted_file("/etc/moos/trust/admin-release.pem") == "present":
+        fingerprint = probe.public_fingerprint()
+        if fingerprint is None:
+            add("fingerprint", "Security / trust", "unknown", "Public key could not be validated",
+                "Ask the administrator to validate the provisioned public key with trusted tooling; do not replace it.")
+        elif expected_fingerprint is None:
+            add("fingerprint", "Security / trust", "info", "Public key parses; publisher fingerprint has not been compared",
+                "Obtain the SHA-256 DER public-key fingerprint independently, then use moos doctor --expect-fingerprint.")
+        else:
+            matches = fingerprint == expected_fingerprint
+            add("fingerprint", "Security / trust", "ok" if matches else "issue",
+                "Public key matches the supplied fingerprint" if matches else "Release trust fingerprint MISMATCH",
+                "" if matches else "Stop release installation. Contact your administrator or publisher through a trusted channel; do not replace the key.")
+    release = probe.admin_release()
+    add("release", "Security / trust", "info" if release == "present" else "unknown" if release == "unknown" else "issue",
+        "Active administrator release pointer has intact metadata" if release == "present" else "Active administrator release is missing, unsafe, or inaccessible",
+        "Pointer metadata is not a signature revalidation." if release == "present" else "Ask the administrator to authenticate a signed release through the independently provisioned installer. Run moos setup --explain trust.")
+    gateway = probe.service("moos-gateway.service")
+    check_remote = remote or gateway != "missing"
+    if check_remote:
+        add("gateway", "Gateway", "ok" if gateway == "active" else "unknown" if gateway == "unknown" else "issue",
+            "Gateway service is running" if gateway == "active" else "Gateway is not running" if gateway != "unknown" else "Gateway service state could not be read",
+            "Service state does not verify a device connection. Test status from your paired iPhone." if gateway == "active" else "Remote status is unavailable. Run moos setup --explain remote; ask the administrator to check Gateway installation and binding.")
+        tailscale = probe.tailscale()
+        add("tailscale", "Remote connectivity", "ok" if tailscale == "connected" else "unknown" if tailscale == "unknown" else "issue",
+            {"connected": "Tailscale is connected", "unavailable": "Tailscale is not installed", "disconnected": "Tailscale is installed but disconnected", "unhealthy": "Tailscale reports a connectivity problem", "unknown": "Tailscale state could not be read"}[tailscale],
+            "Tailscale is transport only; MOOS device authentication is still required." if tailscale == "connected" else "Open Tailscale to install, sign in or resolve its health notice. Run moos setup --explain remote.")
+        add("devices", "Devices", "info", "Device pairing and remote authentication are not inspected",
+            "Use Add Host on your iPhone with a privately transferred pairing code. An administrator can inspect devices with moos-gateway-device list; never share pairing codes.")
+    else:
+        add("remote", "Gateway", "info", "Remote status is optional and the Gateway is not installed",
+            "Local use works without Tailscale. To prepare remote status: moos setup --remote.")
+    return checks
+
+
+@dataclass(frozen=True)
+class HealthItem:
+    """Human presentation only; Check remains the unchanged report contract."""
+    id: str
+    severity: str  # ready, attention, blocked, info
+    title: str
+    message: str
+    action: str = ""
+    details: tuple[str, ...] = ()
+
+
+def health_items(checks: list[Check]) -> list[HealthItem]:
+    """Translate observations into impact and group shared setup procedures."""
+    by_id = {check.id: check for check in checks}
+    items = []
+
+    def group(ids, title, ready, problem, action):
+        members = [by_id[id] for id in ids if id in by_id]
+        if not members:
+            return
+        issues = [check for check in members if check.state in {"issue", "unknown"}]
+        severity = "blocked" if any(check.state == "issue" for check in issues) else "attention" if issues else "ready"
+        items.append(HealthItem(ids[0], severity, title,
+                                problem if issues else ready, action if issues else ""))
+
+    group(("host", "limits", "dependencies"), "Host requirements",
+          "The basic requirements are available.",
+          "This computer is missing a requirement, or it could not be checked.",
+          "moos setup --explain local")
+    group(("runtime", "account"), "Runtime basics",
+          "Required local components are present.",
+          "MOOS's protected local setup needs to be completed or checked.",
+          "moos setup --explain local")
+    control = by_id.get("control")
+    if control:
+        if control.state == "ok":
+            items.append(HealthItem("control", "ready", "Local control", "Your account can reach MOOS."))
+        else:
+            denied = control.summary == "Local access is not authorized"
+            items.append(HealthItem("control", "attention", "Local control",
+                "Your account cannot control Personal MOOS yet. Enabling access needs an administrator-authorized setup step."
+                if denied else "MOOS could not respond to this account. Its local setup needs to be checked.",
+                "moos setup --explain local"))
+    personal = by_id.get("personal")
+    if personal:
+        state = personal.summary.removeprefix("Personal MOOS is ")
+        severity, message, action = {
+            "running": ("ready", "Running.", ""),
+            "stopped": ("info", "Stopped. This is normal when you are not using it; its next start has not been checked.", "moos start"),
+            "starting": ("attention", "Starting. Give it a moment, then check again.", "moos status --human"),
+            "stopping": ("attention", "Stopping. Give it a moment, then check again.", "moos status --human"),
+            "failed": ("blocked", "Personal MOOS could not run normally. Its files have not been changed by this check.", "moos setup --explain local"),
+        }.get(state, ("attention", "Its state could not be confirmed.", "moos doctor --verbose"))
+        items.append(HealthItem("personal", severity, "Personal MOOS", message, action))
+
+    trust_ids = ("helper", "trust", "release", "fingerprint")
+    trust = [by_id[id] for id in trust_ids if id in by_id]
+    if trust:
+        issues = [check for check in trust if check.state in {"issue", "unknown"}]
+        mismatch = any(check.id == "fingerprint" and check.state == "issue" for check in issues)
+        labels = {"helper": "Trusted MOOS installer", "trust": "Public release key",
+                  "release": "Host installation", "fingerprint": "Public release key check"}
+        details = tuple(labels[check.id] + (": missing" if check.summary.endswith(" is missing") else
+                        ": does not match the expected key" if check.id == "fingerprint" and mismatch else
+                        ": could not be checked" if check.state == "unknown" else ": needs a safety check or setup")
+                        for check in issues)
+        severity = "blocked" if any(check.state == "issue" for check in issues) else "attention" if issues else "info"
+        message = ("The installed release key does not match the expected key. Stop installing updates; do not replace the key."
+                   if mismatch else "MOOS Host setup is incomplete or needs a safety check. Safe installation and updates are not ready."
+                   if issues else "Required files are present. Their trusted source is not verified by these local checks.")
+        items.append(HealthItem("trust", severity, "Trusted Host setup", message,
+                                "moos setup --explain trust" if issues else "", details))
+
+    for id, title, ready, problem in (
+        ("gateway", "Remote gateway", "Running.",
+         "Remote status is unavailable or could not be checked. Local use is separate."),
+        ("tailscale", "Tailscale", "Connected.", ""),
+    ):
+        check = by_id.get(id)
+        if check:
+            if id == "tailscale":
+                problem = {
+                    "Tailscale is not installed": "Not installed. It is needed only for remote status.",
+                    "Tailscale is installed but disconnected": "Disconnected. Open Tailscale and sign in or reconnect.",
+                    "Tailscale reports a connectivity problem": "Tailscale reports a connection problem. Open it to see what needs attention.",
+                }.get(check.summary, "Its connection could not be checked. Open Tailscale to check it.")
+            items.append(HealthItem(id, "ready" if check.state == "ok" else "attention", title,
+                                    ready if check.state == "ok" else problem,
+                                    "" if check.state == "ok" else "moos setup --explain remote"))
+    if "devices" in by_id:
+        items.append(HealthItem("devices", "info", "Device pairing",
+                                "Not verified by this local check. Confirm remote access from a paired iPhone."))
+    if "remote" in by_id:
+        items.append(HealthItem("remote", "info", "Remote status", "Not set up. You can use MOOS locally without it."))
+    return items
+
+
+def terminal_symbols(stream=None) -> bool:
+    """Emoji enhance text labels only on an interactive UTF-8 terminal."""
+    stream = sys.stdout if stream is None else stream
+    return (stream.isatty() and (getattr(stream, "encoding", "") or "").lower().replace("-", "") == "utf8"
+            and os.environ.get("TERM") != "dumb" and "NO_COLOR" not in os.environ
+            and "CI" not in os.environ)
+
+
+def cli_digest(path: Path) -> bytes | None:
+    """Read bounded regular CLI bytes, including normal installed symlinks.
+
+    This compares copies; it establishes neither age nor trust and never runs
+    the discovered command. Unexpected/unreadable files produce no claim.
+    """
+    try:
+        resolved = path.resolve(strict=True)
+        fd = os.open(resolved, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as handle:
+            before = os.fstat(handle.fileno())
+            if not stat.S_ISREG(before.st_mode) or before.st_size > 1024 * 1024:
+                return None
+            data = handle.read(1024 * 1024 + 1)
+            after = os.fstat(handle.fileno())
+        identity = lambda value: (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+        if len(data) != before.st_size or identity(before) != identity(after):
+            return None
+        return hashlib.sha256(data).digest()
+    except (OSError, RuntimeError):
+        return None
+
+
+def checkout_cli_differs() -> bool:
+    # The installed layout has no scripts/moos plus tracked manifest layout.
+    current = Path(__file__).resolve()
+    if current != REPO_ROOT / "scripts/moos" or not (REPO_ROOT / "configs/control-plane-manifest.sha256").is_file():
+        return False
+    candidate = shutil.which("moos")
+    if candidate is None:
+        return False
+    current_digest = cli_digest(current)
+    installed_digest = cli_digest(Path(candidate))
+    return current_digest is not None and installed_digest is not None and current_digest != installed_digest
+
+
+def command_text(text: str, checkout: bool) -> str:
+    # Fixed relative advice avoids exposing user paths or printing shell input.
+    return text.replace("moos ", "./scripts/moos ") if checkout else text
+
+
+def checkout_notice() -> str:
+    return ("[NEEDS ATTENTION] The moos command in PATH differs from this checkout.\n"
+            "  It may not support these commands. From the checkout folder, use:\n"
+            "    ./scripts/moos ...\n")
+
+
+def render_checks(checks: list[Check], *, verbose: bool = False, symbols: bool = False,
+                  checkout: bool = False, setup: bool = False) -> None:
+    items = health_items(checks)
+    labels = {"ready": "READY", "attention": "NEEDS ATTENTION", "blocked": "BLOCKED", "info": "INFO"}
+    icons = {"ready": "🟢 ", "attention": "🟡 ", "blocked": "🔴 ", "info": ""}
+    for severity_group, heading in ((("ready",), "Working"), (("blocked", "attention"), "Needs attention"), (("info",), "Good to know")):
+        selected = [item for severity in severity_group for item in items if item.severity == severity]
+        if not selected:
+            continue
+        print("\n" + heading)
+        actions = []
+        for item in selected:
+            prefix = icons[item.severity] if symbols else ""
+            print(textwrap.fill(f"{prefix}[{labels[item.severity]}] {item.title}: {item.message}",
+                                width=88, initial_indent="  ", subsequent_indent="      "))
+            for detail in item.details:
+                print("      - " + detail)
+            if item.action and item.action not in actions:
+                actions.append(item.action)
+        # Shared installation guidance is printed once, even when several
+        # checks need the same administrator-authorized procedure.
+        for action in sorted(actions, key=lambda action: "--explain trust" not in action):
+            print("  Next: " + command_text(action, checkout))
+    print("\nThese checks do not confirm guest login or every safety setting.")
+    print(command_text("Details: moos doctor --verbose", checkout) if not verbose else "")
+    if verbose:
+        print("Technical details (individual observations)")
+        for check in checks:
+            print(f"  [{check.state}] {check.id}: {check.summary}")
+            if check.next_step:
+                print("      " + command_text(check.next_step, checkout))
+    has_issues = any(item.severity in {"blocked", "attention"} for item in items)
+    if not has_issues:
+        print("\nNo problems found in the checks available here.")
+    if setup:
+        print(command_text("Everyday commands: moos help", checkout))
+
+
+def choose_remote(input_fn=input, output=print, *, checkout: bool = False) -> bool:
+    while True:
+        output("Use MOOS here, or also prepare remote status for an iPhone?")
+        output("  1. Use locally (recommended)  2. Also remote status  3. Explain")
+        try:
+            choice = input_fn("Choose [1]: ").strip().lower()
+        except EOFError:
+            output("No answer received; inspecting local use only.")
+            return False
+        if choice in {"", "1"}:
+            return False
+        if choice == "2":
+            return True
+        if choice == "3":
+            output(command_text(GUIDES["remote"], checkout))
+        else:
+            output("Choose 1, 2, or 3. No settings have changed.")
+
+
+def diagnose(args: argparse.Namespace) -> int:
+    # Report mode never adds a presentation-only CLI notice or changes fields.
+    checkout = not args.report and checkout_cli_differs()
+    if checkout:
+        print(checkout_notice())
+    if args.explain:
+        print(command_text(GUIDES[args.explain], checkout))
+        return 0
+    symbols = not args.no_color and terminal_symbols()
+    if args.command == "setup":
+        print(("MOOS 🌱" if symbols else "MOOS") + "\ntiny. green. alive.\n\nLet's see what is ready on this computer.")
+        print("This checks your setup without changing settings; it may wake MOOS to read its status.")
+    remote = args.remote
+    probe = HostProbe()
+    checks = collect_checks(probe, args.socket, remote=remote,
+                            expected_fingerprint=args.expect_fingerprint)
+    if (args.command == "setup" and any(check.id == "remote" for check in checks)
+            and not args.non_interactive and sys.stdin.isatty() and sys.stdout.isatty()):
+        try:
+            remote = choose_remote(checkout=checkout)
+        except KeyboardInterrupt:
+            print("\nSetup cancelled. No settings changed.")
+            return 130
+        if remote:
+            checks = collect_checks(probe, args.socket, remote=True,
+                                    expected_fingerprint=args.expect_fingerprint)
+    attention = any(check.state in {"issue", "unknown"} for check in checks)
+    if args.report:
+        print(json.dumps({"schemaVersion": 1, "attentionNeeded": attention,
+                          "checks": [asdict(check) for check in checks]}, indent=2))
+    else:
+        if args.command == "doctor":
+            print("MOOS doctor - what is working and what needs attention")
+        render_checks(checks, verbose=args.verbose, symbols=symbols,
+                      checkout=checkout, setup=args.command == "setup")
+    return 1 if attention else 0
+
+
+def connection_error(error: Exception, args: argparse.Namespace) -> None:
+    if args.human or args.command in {"start", "stop", "shell"}:
+        message = ("Your account cannot control Personal MOOS yet."
+                   if isinstance(error, PermissionError) else "MOOS could not be reached from this account.")
+        print("[NEEDS ATTENTION] " + message, file=sys.stderr)
+        print(command_text("Next: moos doctor", checkout_cli_differs()), file=sys.stderr)
+    else:
+        print(f"moos: daemon connection failed: {error}\nRun moos doctor for the next step.", file=sys.stderr)
+
+
 def main() -> int:
     args = parse_args()
-    if args.command == "personal" and args.action == "terminal":
+    if args.command == "help":
+        checkout = checkout_cli_differs()
+        if checkout:
+            print(checkout_notice())
+        print(command_text(HELP, checkout))
+        return 0
+    if args.command in {"setup", "doctor"}:
+        return diagnose(args)
+    if args.command == "shell" or (args.command == "personal" and args.action == "terminal"):
         try:
             return terminal(args.socket)
         except (OSError, ConnectionError, ValueError) as error:
-            print(f"moos: daemon connection failed: {error}", file=sys.stderr)
+            connection_error(error, args)
             return 1
     try:
         operation = operation_for(args)
@@ -205,13 +935,16 @@ def main() -> int:
     try:
         response = request(args.socket, operation)
     except (OSError, ConnectionError, ValueError) as error:
-        print(f"moos: daemon connection failed: {error}", file=sys.stderr)
+        connection_error(error, args)
         return 1
 
     if isinstance(response, ControlFailure):
         print(f"moos: {response.code}: {response.message}", file=sys.stderr)
         return 1
-    print(json.dumps(response.data.as_dict(), indent=2, sort_keys=True))
+    if args.human or args.command in {"start", "stop"}:
+        print("Personal MOOS: " + response.data.as_dict()["personal"]["state"])
+    else:
+        print(json.dumps(response.data.as_dict(), indent=2, sort_keys=True))
     return 0
 
 

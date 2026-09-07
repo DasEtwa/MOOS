@@ -38,6 +38,142 @@ The current default branch also contains the post-release host, gateway, and
 control-plane hardening; the release channel and the production branch are
 therefore intentionally not the same snapshot.
 
+## First steps on the Host
+
+```sh
+moos setup
+moos doctor
+moos help
+moos start
+moos status --human
+moos shell
+moos stop
+```
+
+Before the CLI is installed, run `./scripts/moos setup` as your normal user
+from this checkout (Python 3 is required). MOOS currently supports the Linux
+x86-64/systemd/cgroup-v2 Host baseline. Setup detects Host prerequisites,
+local access, Personal state, runtime account metadata, administrator-release
+trust metadata, and an installed Gateway. It asks only whether to prepare
+optional iPhone remote status when no Gateway is installed. It never asks for
+resource sizing. `--non-interactive` selects local use without prompting;
+`--remote` explicitly includes remote prerequisites. This choice selects checks
+for this invocation, not a saved setting. An existing Gateway is checked even
+when local use was selected.
+
+Setup is a guided readiness check, not an installer. A new Host still needs an
+administrator to provision the trusted installer and public release key through
+an independently authenticated channel. **This repository does not yet ship a
+turnkey OS package/bootstrap.** The [trusted onboarding assessment](HOST_ONBOARDING.md)
+records the distribution, image-provenance and release-login gates for a real
+installer; it is a proposal, not an available installation path. Setup makes
+that stop point explicit and gives
+these self-contained next-step guides:
+
+```sh
+moos setup --explain trust
+moos setup --explain local
+moos setup --explain remote
+```
+
+Ordinary users need no private release-signing key. Release publishers create
+or import their identity only in an isolated trusted signing environment and
+provision only its public key to Hosts; see [ADMIN_RELEASES.md](ADMIN_RELEASES.md).
+No checkout command may receive a private signing key or bootstrap itself as
+root. After authentication, an administrator installs the runtime, stages the
+Personal image, activates local control, and explicitly grants the local
+operator access. Log in again after that grant. See the local guide and the
+administrator procedure below. Onboarding does not alter accounts, images,
+trust anchors, services, Tailscale configuration, or device credentials. Its
+status request can activate the already installed local control service.
+
+`moos start`, `moos stop`, and `moos shell` use the same local typed operations
+as `moos personal start`, `moos personal stop`, and `moos personal terminal`.
+The explicit forms and their JSON output remain compatible. `moos status`
+still returns JSON; `--human` provides a short readable state. The shell is the
+existing guest serial console, not a Host shell or remote terminal. Release
+images have locked root login; onboarding does not create a guest login or
+bypass it. The blank development login remains limited to the explicitly built
+local development profile.
+
+### Understanding doctor
+
+`moos setup` and `moos doctor` group their default output into **Working**,
+**Needs attention**, and **Good to know**, using the same text labels:
+
+- `READY`: the named check passed, not a certification of the entire Host.
+- `NEEDS ATTENTION`: an incomplete step, unknown observation, transition, or
+  remote-status problem. Local account access requires an administrator-authorized
+  step; the message does not assume who owns the Host.
+- `BLOCKED`: a required Host component failed its check or safe installation/
+  updates cannot proceed. This does not mean every existing service has stopped.
+- `INFO`: a normal state or a limit of what can be checked here. Stopped Personal
+  is normal; its next start has not been verified.
+
+Related setup issues share one next-step guide. Missing installer, public key,
+and active release are grouped as **Trusted Host setup**, with a single trust
+guide. A key mismatch still explicitly says to stop installing updates and not
+replace the key. Technical individual observations remain available through
+`moos doctor --verbose` (also accepted by setup) and unchanged in `--report`.
+Green/yellow/red emoji enhance the labels only in interactive UTF-8 terminals;
+there are no ANSI escapes. `--no-color`, `NO_COLOR`, `TERM=dumb`, CI, and piped
+output use plain text labels. Color or emoji is never needed to interpret status.
+
+An idle socket-activated control service is not treated as failed. A stopped
+Personal is a valid state, but does not prove that its private image is staged.
+A running state does not certify guest boot, guest login, or effective runtime
+limits. Those still need administrator/runtime acceptance. Doctor does not
+read the private device store or infer whether a device is paired.
+
+Runtime-account readiness uses the managed launcher's security contract: the
+fixed home, named primary group, exact non-login shell, absence of supplementary
+groups, and locked password must all be observable and correct. If the current
+user cannot inspect the password status, Doctor reports that check as unknown
+rather than inferring readiness.
+
+The Gateway service and Tailscale connection are checked separately. Service
+activity does not prove remote reachability, correct client pairing, or a
+successful authenticated status request. Use the paired iPhone to verify that
+last step. Local use needs no Tailscale; remote status uses Tailscale **and**
+MOOS device authentication, as described in [GATEWAY.md](GATEWAY.md).
+
+```sh
+moos doctor --remote
+moos doctor --verbose
+moos doctor --no-color
+moos doctor --report
+moos doctor --expect-fingerprint HEX_DIGITS
+```
+
+The optional fingerprint compares the installed RSA/ECDSA public key's DER
+SHA-256 with a value obtained through a separate trusted channel. Metadata and
+fingerprint checks do not authenticate the installer or revalidate an installed
+release signature. A mismatch requires stopping release installation and
+contacting the administrator/provider, never silently replacing the key.
+
+`--report` prints schema-versioned JSON containing only the curated check IDs,
+states, summaries and next steps. It includes no raw command output, logs,
+Host/user/device names, addresses, socket arguments, fingerprints, or keys.
+The report describes installation health, so review it before sharing. There
+is no `--fix` yet. Checks have stable IDs and keep observation, explanation and
+rendering separate so later narrowly authorized remediation can be added.
+Both setup and doctor exit 1 for a detected problem or indeterminate required
+check, 0 when observable checks pass (informational verification limits can
+remain), and 2 for invalid arguments. Piped setup never prompts. These existing
+exit codes and the JSON `attentionNeeded` field follow the original observations,
+not presentation labels: an ordinary start/stop transition or a CLI-copy notice
+can be yellow without changing the exit code. `--verbose` and `--report` are
+mutually exclusive; `--report` never contains human notices, symbols or colors.
+
+When the checkout CLI can read both itself and the `moos` executable resolved
+through PATH, it compares their bounded file contents without executing that
+command. If they differ, setup, doctor and help display a short notice and use
+`./scripts/moos ...` for their advice, relative to the checkout folder. There is
+no CLI version metadata that establishes age, so this says **different**, never
+**older**. Identical copies (including installed symlinks), missing/unreadable
+commands, and the installed CLI itself do not produce that notice. This is a
+presentation aid, not an authenticity check or an instruction to reinstall.
+
 ## Repository layout
 
 | Path | Purpose |

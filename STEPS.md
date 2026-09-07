@@ -389,8 +389,11 @@ simulator build/test job and the new unsigned device job. The device log records
 the `Release-iphoneos` product, `arm64-apple-ios17.0` target, and `platform IOS`;
 the uploaded `MOOS-unsigned-iphoneos-arm64` artifact contains `MOOS.ipa` with
 the standard `Payload/MOOSApp.app` layout.
-The workflow uses `macos-15`, Xcode 16.4, an iPhone 16 / iOS 18.5 simulator,
-`build-for-testing`, and `test-without-building` with code signing disabled. A
+The workflow uses `macos-15`, Xcode 16.4, and a compatible installed iPhone
+simulator selected by UDID, preferring iPhone 16 / iOS 18.5 when available.
+It may create a device from an already installed iOS 17.0-or-newer runtime but
+does not download runtimes. `build-for-testing` and `test-without-building` run
+against the same selected UDID with code signing disabled. A
 separate Release build uses `iphoneos`, a generic iOS-device destination, and
 an explicit arm64 architecture; `lipo`, `vtool`, and the app's platform metadata
 must all confirm a physical-device product before `Payload/MOOSApp.app` is
@@ -466,8 +469,119 @@ compilation because the hosted runner did not provide the requested `iPhone 16`
 / `iOS 18.5` destination. The subsequent documentation-only commit `d96f917`
 completed the iOS workflow successfully (simulator/unit tests and unsigned
 device job; run `33990323811`) and its Gateway check passed (run `33990323853`).
-The effective current checks are green; the earlier failure was runner-image
-drift, not a product failure.
+The workflow now discovers installed compatible simulators instead of requiring
+that exact destination and fails if no compatible installed runtime/device type
+can be used. Local Linux verifies the selection policy; real selection and
+Xcode execution remain macOS CI evidence.
+
+## Operator UX foundation — 2026-09-06
+
+Prerequisites: implemented M4–M6 local control, existing authenticated
+administrator release contract, and existing status-only Gateway. This is a
+local operator slice, not completion of deferred M8 remote terminal work.
+
+Status: Implemented in the CLI; installed Host onboarding acceptance pending.
+
+`moos setup` detects local readiness and explains the administrator trust,
+local installation and optional remote-status paths. It asks only about remote
+status when no Gateway exists; non-interactive use is supported. `moos doctor`
+separates curated observations from rendering, reports actionable failures and
+unverified areas, and offers a sanitized schema-versioned JSON report. Local
+`start`, `stop`, and `shell` aliases use existing typed operations; explicit
+commands and default status JSON remain compatible. No installer, trust
+transition, protocol operation, resource policy or privilege was added. The
+existing CLI artifact remains in the unchanged administrator bundle allowlist;
+its control-plane manifest and embedded digest were refreshed.
+
+Verification: 18 operator tests; existing CLI, daemon, Protocol contract,
+runtime control, isolation, launcher, Personal identity, Host regression,
+release-profile, control-plane installer, administrator-release, Gateway auth
+and Gateway integration tests passed. Rust workspace tests passed (30 tests).
+Python compilation, shell syntax, diff checks and an unsigned administrator
+bundle build using the existing release binaries passed. Independent security
+review found no remaining blocking findings after correcting the initial
+lifecycle-timeout scope and adding direct trust-detector tests.
+
+The available generated image has locked root login (verified by the release
+rootfs validator). The development QEMU smoke attempt reached login but timed
+out waiting for its expected blank-password shell; this is the wrong image
+profile for that acceptance, not evidence of a CLI/runtime regression. The
+release QEMU smoke verifies boot and rejection of blank root login. Full
+development utility/login and terminal reconnect acceptance are not verified
+in this slice; no image was modified to bypass login. Real administrator
+installation/activation, account grants, private image staging, trust-channel
+authenticity and paired-iPhone connectivity remain unverified. ShellCheck was
+unavailable locally. No macOS or hardware claim is made.
+
+Deferred product steps: independently authenticated OS-package/bootstrap
+provisioning and an explicit release-guest login model, then first-run
+acceptance on a clean Host. No automatic fixes or signing-key creation/import
+inside checkout tooling. BRAIN/MOOS was not available in this workspace;
+README, ROADMAP and ARCHITECTURE there should record this operator model and
+its remaining bootstrap/login limitations when that context is available.
+
+### Operator presentation polish — 2026-09-06
+
+Setup, doctor and help now present short owner-neutral guidance. A separate
+presentation layer groups shared installation steps and labels results READY,
+NEEDS ATTENTION, BLOCKED or INFO by user impact. A stopped Personal and
+uninspected device authentication are not failures; trust mismatches still
+explicitly stop update installation. Technical observations remain available
+with `--verbose`, while the existing report schema, fields and diagnostic
+exit-code rules are unchanged. Optional emoji never replace text labels;
+non-interactive/CI/NO_COLOR/--no-color output is plain text with no ANSI escapes.
+
+A bounded read-only comparison can notice when the PATH-resolved CLI differs
+from the checkout. It never executes that file, infers version age, or changes
+installation. Human advice then uses the checkout's relative command. Host
+checks, protocol operations and terminal implementation are unchanged.
+
+Verification: 29 operator tests plus existing CLI, daemon, Protocol contract,
+Host regressions, runtime control, isolation, launcher, Personal identity,
+control-plane installer, administrator-release, Gateway auth and Gateway
+integration tests passed. Python compilation, shell syntax, diff checks and an
+unsigned administrator-bundle build using existing release binaries passed.
+An incremental AST comparison confirmed the existing checks and protocol/
+terminal paths were unchanged. Live setup/help output was inspected locally.
+The independent review found no blocking issue in the incremental code it
+examined, but its final review completion was unavailable due to a usage limit;
+the final diff was reviewed locally. No new security architecture is declared.
+
+No real installation, account grant, trust change, remote-device acceptance,
+QEMU boot or terminal session was performed for this presentation-only pass.
+The existing release-image/development-login limitation above still applies.
+ShellCheck remains unavailable. README was synchronized; this polish introduces
+no new BRAIN architecture requirement beyond the outstanding operator-model
+sync described above.
+
+### Trusted first-run onboarding assessment — 2026-09-07
+
+Status: Blocked at the trust/login architecture gate; no installer implemented.
+
+`HOST_ONBOARDING.md` records the inspected implementation, a proposed initial
+Ubuntu 24.04 amd64 package boundary, the fixed installed first-run operation,
+and its threat model and required acceptance. Missing inputs are an independently
+authenticated publisher/channel and public trust material, authenticated
+Personal/runtime payload provenance, and a reviewed release-guest login model.
+The existing release profile remains locked; setup remains diagnostic.
+
+Independent read-only review confirmed these gaps and the stricter task's
+conflict with checkout signing in `tests/admin_release.py`. That harness was
+not run; public-only externally signed test fixtures are required without
+weakening existing verification coverage. No package, account, trust, service,
+credential, release image, Gateway grant or protocol was changed. The existing
+uncommitted operator UX work was preserved. BRAIN/MOOS is absent; synchronize
+its open onboarding prerequisites when it becomes available.
+
+Verification for this documentation-only assessment: release-profile,
+Protocol-v1 contract, local CLI, control-plane installer, runtime-isolation
+policy and QEMU-launcher tests passed, as did `git diff --check`. Independent
+review of the assessment found no blocking documentation/security issue; it
+is not an implementation or package security review. No build, real QEMU boot,
+Host installation, service replacement, Tailscale login or iPhone acceptance
+was performed. Missing channel trust prevents delivery of an authenticated
+consumer installation; it does not make an unsigned packaging prototype
+inherently impermissible.
 
 ## Mobile integration status
 

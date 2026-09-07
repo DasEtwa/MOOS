@@ -79,8 +79,14 @@ outside this slice.
 ## Build verification
 
 `.github/workflows/ios.yml` selects Xcode 16.4 on a GitHub-hosted `macos-15`
-runner, builds for the iPhone 16 / iOS 18.5 simulator, and then runs the unit
-tests without rebuilding. A separate job builds the Release app against the
+runner, prefers the existing iPhone 16 / iOS 18.5 simulator, otherwise selects
+an available compatible iPhone, and then runs the unit tests on that same UDID
+without rebuilding. A generic simulator catalog query first waits for the
+hosted runner's CoreSimulator service to finish its first-run discovery. If no
+device is pre-created, CI may create one only from an already installed iOS
+17.0-or-newer runtime and installed iPhone device type; it never downloads a
+runtime and fails if no compatible simulator can be used. A separate job builds
+the Release app against the
 physical-device `iphoneos` SDK with an arm64-only executable, verifies its
 Mach-O platform is `IOS` rather than `IOSSIMULATOR`, and packages
 `Payload/MOOSApp.app` as the `MOOS.ipa` workflow artifact. All build commands
@@ -97,11 +103,11 @@ Pages. Signing and installation remain entirely external in SideStore. See
 [`distribution/ios/README.md`](../../distribution/ios/README.md) for the
 Pages setting and exact release procedure.
 
-The published `ios-v0.1.3` release workflow passed. An earlier default-branch
-push on 2026-09-05 could not find the requested `iPhone 16` / `iOS 18.5`
-destination on the hosted runner, but the subsequent documentation-only commit
-`d96f917` passed both the simulator/unit-test and unsigned-device jobs. Local
-Linux cannot reproduce macOS runner-device availability.
+The published `ios-v0.1.3` release workflow passed. Earlier runs could disagree
+about whether the fixed `iPhone 16` / `iOS 18.5` destination existed on an
+otherwise identical hosted image. Simulator selection is now based on the
+installed runtimes and devices instead of that fixed destination. Local Linux
+can test the selection policy but cannot execute Xcode or an iOS simulator.
 
 The equivalent project and scheme are:
 

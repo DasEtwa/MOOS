@@ -24,6 +24,7 @@ from moos_protocol import FrameDecoder
 loader = importlib.machinery.SourceFileLoader('moos_cli', str(ROOT / 'scripts/moos'))
 spec = importlib.util.spec_from_loader(loader.name, loader)
 cli = importlib.util.module_from_spec(spec)
+sys.modules[loader.name] = cli
 loader.exec_module(cli)
 
 
