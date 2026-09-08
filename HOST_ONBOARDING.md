@@ -115,13 +115,12 @@ setup must explicitly say that release shell access is unavailable.
 | Remote privilege expansion | Tailscale remains optional transport; preserve per-device authentication, revocation, and status-only Gateway/daemon enforcement. |
 
 `tests/admin_release.py` uses immutable NIST public verification material and no
-private signing identity. Valid and tampered signature handling, deterministic
-archive creation, extraction, activation, rollback and malicious-member
-rejection remain covered. A future signed MOOS administrator-bundle fixture
-must be prepared in the independent signing environment before claiming the
-complete end-to-end publisher fixture gate; checkout tooling must never create
-it. The existing public-vector and archive tests do not substitute for that
-external acceptance evidence.
+private signing identity. An externally signed immutable MOOS test bundle now
+binds deterministic archive creation to opaque staging, signature verification,
+authenticated extraction, activation and rollback. Valid and tampered NIST
+verification handling and malicious-member rejection remain covered. The test
+fixture is not a production publisher identity and does not substitute for
+authenticated bootstrap-channel or real Host acceptance evidence.
 
 The implementation gate requires the publisher/channel trust input, an
 authenticated Personal/runtime distribution design, and a reviewed guest-login

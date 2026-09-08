@@ -40,3 +40,35 @@ This fixture contains only the NIST public point on `prime256v1`; no private
 scalar is present or required. It verifies that the operator fingerprint path
 continues to accept the documented ECDSA public-key form without generating a
 cryptographic identity inside the checkout.
+
+`moos-admin-release-v1.tar`, its detached `.sig`, and
+`moos-admin-release-v1.pub` form an immutable, externally signed integration
+fixture for the real administrator-release archive format. The archive was
+built from repository commit `9ae7795405885cea46293cbfabe21dc335742b55` with
+the normal deterministic builder. Its two Gateway executable members contain
+the same fixed test-only ELF bytes used by `tests/admin_release.py`; every other
+member contains the repository source bytes selected by `RELEASE_MEMBERS`.
+
+The unsigned archive left the checkout before a one-time, non-production RSA
+fixture identity signed it in an isolated external temporary environment. The
+private fixture key was destroyed there. It never entered the repository,
+checkout tooling, build/output trees, repository-controlled temporary paths,
+or CI. Only these public verification artifacts returned:
+
+```text
+moos-admin-release-v1.tar
+SHA-256: 399de03de8faa07f0cd3bdbf01913bb68a0d2ac533f7c0cea23259ccfbb2f7d2
+
+moos-admin-release-v1.tar.sig
+SHA-256: 31a22ab36a29d48e2de9370b50d0d165cea6fe333a00fcc3c6bccea63ee781f1
+
+moos-admin-release-v1.pub
+SHA-256: 83165476282c93a07bdeff408860825d69e5462b6cccdd8537560a41be2501da
+SubjectPublicKeyInfo DER SHA-256: c9e954a07c6b561f3eb92a5bee6ac7343b05c0e701043dd310b645d69e50fd42
+```
+
+The test first requires a newly generated archive to match the fixture archive
+byte for byte. Only then may the detached signature authenticate that generated
+archive. Extraction consumes the returned private staged copy, preserving the
+production authentication-before-parsing order. This fixture is test evidence,
+not a production publisher identity or bootstrap trust anchor.

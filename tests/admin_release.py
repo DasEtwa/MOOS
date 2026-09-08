@@ -17,6 +17,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = REPO_ROOT / "tests/fixtures"
+TEST_GATEWAY_MEMBERS = {
+    "target/release/moos-gateway",
+    "target/release/moos-gateway-device",
+}
+TEST_GATEWAY_BINARY = b"\x7fELF" + b"MOOS test release\n"
 sys.path.insert(0, str(REPO_ROOT / "host"))
 from moos_admin_installer import (  # noqa: E402
     InstallError,
@@ -32,11 +37,12 @@ def copy_release_source(destination: Path) -> None:
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         source = REPO_ROOT / relative
-        if source.is_file():
-            shutil.copy2(source, target)
-        else:
-            target.write_bytes(b"\x7fELF" + b"MOOS test release\n")
+        if relative in TEST_GATEWAY_MEMBERS:
+            target.write_bytes(TEST_GATEWAY_BINARY)
             target.chmod(0o755)
+        else:
+            assert source.is_file(), f"release source is missing: {relative}"
+            shutil.copy2(source, target)
 
 
 def run(*arguments: str | Path) -> subprocess.CompletedProcess[str]:
@@ -82,7 +88,7 @@ def main() -> int:
         encoding="utf-8"
     )
     assert "--signing-key" not in builder_source
-    public_key = FIXTURES / "nist-rsa-pkcs1v15-sha256-public.pub"
+    nist_public_key = FIXTURES / "nist-rsa-pkcs1v15-sha256-public.pub"
     vector_message_data = read_hex_fixture(
         "nist-rsa-pkcs1v15-sha256-message.hex"
     )
@@ -97,9 +103,12 @@ def main() -> int:
     assert hashlib.sha256(vector_signature_data).hexdigest() == (
         "163d8eda000cc67e1af3d9e909731c895fb3c31e186faf2828e803067a89cf6f"
     )
-    assert hashlib.sha256(public_key.read_bytes()).hexdigest() == (
+    assert hashlib.sha256(nist_public_key.read_bytes()).hexdigest() == (
         "9804e93d8f3e1c0f8d291ec95b9830de13e966126e5d2d74ecc9c10cd7e58d76"
     )
+    release_fixture = FIXTURES / "moos-admin-release-v1.tar"
+    release_signature = FIXTURES / "moos-admin-release-v1.tar.sig"
+    release_public_key = FIXTURES / "moos-admin-release-v1.pub"
     for privileged_script in (
         "scripts/setup-control-plane.sh",
         "scripts/setup-gateway.sh",
@@ -132,6 +141,32 @@ def main() -> int:
                 in result.stdout
             )
         assert first.read_bytes() == second.read_bytes(), "bundle is not deterministic"
+        fixture_data = release_fixture.read_bytes()
+        assert hashlib.sha256(fixture_data).hexdigest() == (
+            "399de03de8faa07f0cd3bdbf01913bb68a0d2ac533f7c0cea23259ccfbb2f7d2"
+        )
+        assert first.read_bytes() == fixture_data, (
+            "generated administrator release differs from the externally signed fixture"
+        )
+        assert hashlib.sha256(release_signature.read_bytes()).hexdigest() == (
+            "31a22ab36a29d48e2de9370b50d0d165cea6fe333a00fcc3c6bccea63ee781f1"
+        )
+        assert hashlib.sha256(release_public_key.read_bytes()).hexdigest() == (
+            "83165476282c93a07bdeff408860825d69e5462b6cccdd8537560a41be2501da"
+        )
+
+        release_staging = temporary / "release-staging"
+        release_staging.mkdir(mode=0o700)
+        authenticated_release, release_digest = authenticate_to_private_files(
+            first,
+            release_signature,
+            release_public_key,
+            release_staging,
+            openssl=openssl,
+        )
+        assert authenticated_release != first
+        assert authenticated_release.read_bytes() == fixture_data
+        assert release_digest == hashlib.sha256(fixture_data).hexdigest()
 
         vector_message = temporary / "nist-vector-message"
         vector_message.write_bytes(vector_message_data)
@@ -142,7 +177,7 @@ def main() -> int:
         authenticated_vector, vector_digest = authenticate_to_private_files(
             vector_message,
             vector_signature,
-            public_key,
+            nist_public_key,
             vector_private,
             openssl=openssl,
         )
@@ -159,7 +194,7 @@ def main() -> int:
             authenticate_to_private_files(
                 tampered_vector,
                 vector_signature,
-                public_key,
+                nist_public_key,
                 rejected_vector,
                 openssl=openssl,
             )
@@ -170,7 +205,7 @@ def main() -> int:
 
         extracted = temporary / "extracted"
         extracted.mkdir()
-        extract_authenticated_bundle(first, extracted)
+        extract_authenticated_bundle(authenticated_release, extracted)
         extracted_files = {
             str(path.relative_to(extracted))
             for path in extracted.rglob("*")
@@ -182,7 +217,7 @@ def main() -> int:
         current = temporary / "current"
         invalid_digest_extract = temporary / "extracted-invalid-digest"
         invalid_digest_extract.mkdir()
-        extract_authenticated_bundle(first, invalid_digest_extract)
+        extract_authenticated_bundle(authenticated_release, invalid_digest_extract)
         try:
             activate_extracted_release(
                 invalid_digest_extract,
@@ -206,7 +241,7 @@ def main() -> int:
 
         repeated = temporary / "repeated"
         repeated.mkdir()
-        extract_authenticated_bundle(first, repeated)
+        extract_authenticated_bundle(authenticated_release, repeated)
         assert activate_extracted_release(
             repeated,
             "a" * 64,
@@ -219,7 +254,7 @@ def main() -> int:
         symlinked_target.symlink_to(final)
         symlinked_extract = temporary / "extracted-symlink"
         symlinked_extract.mkdir()
-        extract_authenticated_bundle(first, symlinked_extract)
+        extract_authenticated_bundle(authenticated_release, symlinked_extract)
         try:
             activate_extracted_release(
                 symlinked_extract,
@@ -238,7 +273,7 @@ def main() -> int:
         for digest in ("b" * 64, "c" * 64, "d" * 64):
             next_extracted = temporary / f"extracted-{digest[0]}"
             next_extracted.mkdir()
-            extract_authenticated_bundle(first, next_extracted)
+            extract_authenticated_bundle(authenticated_release, next_extracted)
             final = activate_extracted_release(
                 next_extracted,
                 digest,
@@ -254,6 +289,34 @@ def main() -> int:
         assert (releases / ("d" * 64)).is_dir()
         assert not (releases / ("a" * 64)).exists()
         assert not (releases / ("b" * 64)).exists()
+
+        tampered_release = temporary / "tampered-release.tar"
+        tampered_release.write_bytes(
+            fixture_data[:-1] + bytes([fixture_data[-1] ^ 1])
+        )
+        tampered_signature = temporary / "tampered-release.sig"
+        signature_data = release_signature.read_bytes()
+        tampered_signature.write_bytes(
+            signature_data[:-1] + bytes([signature_data[-1] ^ 1])
+        )
+        for label, candidate, signature in (
+            ("bundle", tampered_release, release_signature),
+            ("signature", first, tampered_signature),
+        ):
+            rejected_release = temporary / f"rejected-{label}"
+            rejected_release.mkdir()
+            try:
+                authenticate_to_private_files(
+                    candidate,
+                    signature,
+                    release_public_key,
+                    rejected_release,
+                    openssl=openssl,
+                )
+            except InstallError as error:
+                assert "signature verification failed" in str(error)
+            else:
+                raise AssertionError(f"tampered release {label} was accepted")
 
         malicious = temporary / "malicious.tar"
         with tarfile.open(malicious, mode="w", format=tarfile.USTAR_FORMAT) as archive:
@@ -272,7 +335,8 @@ def main() -> int:
 
     print("MOOS administrator release trust-boundary test: PASS")
     print("  NIST public vector: opaque-copied and signature-verified; tamper rejected")
-    print("  archive: deterministic, exact allowlist, regular files only")
+    print("  signed MOOS fixture: deterministic match, staged authentication, tamper rejected")
+    print("  authenticated archive: exact allowlist, regular files only")
     print("  malicious symlink archive: rejected")
     print("  documentation: no privileged checkout entry point")
     return 0
