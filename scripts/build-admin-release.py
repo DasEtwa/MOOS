@@ -23,6 +23,16 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "host"))
 from moos_admin_installer import MAX_MEMBER_BYTES, RELEASE_MEMBERS  # noqa: E402
+from moos_verification import (  # noqa: E402
+    ARTIFACT_ADMIN_RELEASE,
+    MANIFEST_NAME,
+    ROLE_ADMIN_RELEASE,
+    build_manifest,
+    canonical_manifest_bytes,
+)
+
+
+DEFAULT_VERSION = "0.1.0"
 
 
 def read_stable(path: Path) -> bytes:
@@ -80,7 +90,7 @@ def validate_control_manifest(files: dict[str, bytes]) -> None:
             raise ValueError(f"manifest source digest mismatch: {relative}")
 
 
-def build_bundle(source_root: Path, output: Path) -> str:
+def build_bundle(source_root: Path, output: Path, version: str = DEFAULT_VERSION) -> str:
     files = {
         relative: read_stable(source_root / relative) for relative in RELEASE_MEMBERS
     }
@@ -88,6 +98,16 @@ def build_bundle(source_root: Path, output: Path) -> str:
         if files[binary][:4] != b"\x7fELF":
             raise ValueError(f"Gateway release artifact is not ELF: {binary}")
     validate_control_manifest(files)
+    manifest = build_manifest(
+        artifact_type=ARTIFACT_ADMIN_RELEASE,
+        version=version,
+        platform="linux",
+        architecture="x86_64",
+        channel="stable",
+        role=ROLE_ADMIN_RELEASE,
+        files=files,
+    )
+    manifest_bytes = canonical_manifest_bytes(manifest)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
@@ -97,6 +117,15 @@ def build_bundle(source_root: Path, output: Path) -> str:
     temporary = Path(temporary_name)
     try:
         with tarfile.open(temporary, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+            manifest_member = tarfile.TarInfo(MANIFEST_NAME)
+            manifest_member.size = len(manifest_bytes)
+            manifest_member.mode = 0o644
+            manifest_member.uid = 0
+            manifest_member.gid = 0
+            manifest_member.uname = "root"
+            manifest_member.gname = "root"
+            manifest_member.mtime = 0
+            archive.addfile(manifest_member, io.BytesIO(manifest_bytes))
             for relative in sorted(RELEASE_MEMBERS):
                 data = files[relative]
                 member = tarfile.TarInfo(relative)
@@ -118,6 +147,7 @@ def build_bundle(source_root: Path, output: Path) -> str:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-root", type=Path, default=REPO_ROOT)
+    parser.add_argument("--version", default=DEFAULT_VERSION)
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args()
 
@@ -125,7 +155,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     arguments = parse_args()
     try:
-        digest = build_bundle(arguments.source_root.resolve(), arguments.output.resolve())
+        digest = build_bundle(
+            arguments.source_root.resolve(), arguments.output.resolve(), arguments.version
+        )
     except (OSError, UnicodeError, ValueError, tarfile.TarError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1

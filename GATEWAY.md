@@ -231,3 +231,9 @@ flow and the existing administrator installation/pairing procedure above.
 It does not configure Tailscale, change ACLs, read the credential store, invoke
 pairing, or grant remote operations. Device checks remain explicitly unverified
 rather than treating inaccessible credentials as an empty device list.
+
+The Host bootstrap can prepare local operation independently of this optional
+transport. Package-based `moos setup --remote` retains separate Tailscale,
+Gateway and unverified pairing observations; it does not install Tailscale,
+activate the Gateway or create pairing credentials. These explicit administrator
+steps remain separate, and no Gateway grants or Protocol operations change.

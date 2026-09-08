@@ -32,7 +32,7 @@ UNIT_ROOT='/etc/systemd/system'
 DOC_ROOT='/usr/share/doc/moos'
 DAEMON_VERSION='MOOS control daemon 1'
 MANIFEST_RELATIVE='configs/control-plane-manifest.sha256'
-MANIFEST_SHA256='99ae49ec2af0cd1bf00b9f484e10f90db4a28adb20b8b5b57de5321bd1b3f7ca'
+MANIFEST_SHA256='85722456d41745b158e0fa3a239af876e0cea27a263a5aff4ec44bf59a6a3a12'
 DRY_RUN=0
 
 usage() {
@@ -107,6 +107,7 @@ root, manifest_relative, manifest_hash, dry_run = sys.argv[1:]
 require_root_owned = dry_run != "1"
 required_files = {
     "host/moos_protocol.py",
+    "host/moos_verification.py",
     "host/moos_runtime.py",
     "host/moosd.py",
     "scripts/moos",
@@ -335,6 +336,8 @@ PY
 
 stage_file "$SOURCE_ROOT/host/moos_protocol.py" "$STAGING/moos_protocol.py" 0644 \
     "$(manifest_hash host/moos_protocol.py)"
+stage_file "$SOURCE_ROOT/host/moos_verification.py" "$STAGING/moos_verification.py" 0644 \
+    "$(manifest_hash host/moos_verification.py)"
 stage_file "$SOURCE_ROOT/host/moos_runtime.py" "$STAGING/moos_runtime.py" 0644 \
     "$(manifest_hash host/moos_runtime.py)"
 stage_file "$SOURCE_ROOT/host/moosd.py" "$STAGING/moosd.py" 0644 \

@@ -2,9 +2,9 @@ name: Host and guest policy
 
 on:
   push:
-    paths: ['host/**', 'scripts/**', 'systemd/**', 'configs/**', 'system/overlay/**', 'patches/**', 'tests/**', '.github/**']
+    paths: ['host/**', 'distribution/host/**', 'scripts/**', 'systemd/**', 'configs/**', 'system/overlay/**', 'patches/**', 'tests/**', '.github/**']
   pull_request:
-    paths: ['host/**', 'scripts/**', 'systemd/**', 'configs/**', 'system/overlay/**', 'patches/**', 'tests/**', '.github/**']
+    paths: ['host/**', 'distribution/host/**', 'scripts/**', 'systemd/**', 'configs/**', 'system/overlay/**', 'patches/**', 'tests/**', '.github/**']
   workflow_dispatch:
 
 permissions:
@@ -44,5 +44,6 @@ jobs:
           python3 tests/personal_identity.py
           python3 tests/host_regressions.py
           python3 tests/admin_release.py
+          python3 tests/host_bootstrap.py
       # Real QEMU builds and privileged systemd acceptance are explicit local
       # checks documented in ISSUE_FIXES.md; this job never installs MOOS services.
