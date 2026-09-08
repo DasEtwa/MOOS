@@ -590,6 +590,63 @@ was performed. Missing channel trust prevents delivery of an authenticated
 consumer installation; it does not make an unsigned packaging prototype
 inherently impermissible.
 
+### Trusted Host bootstrap implementation — 2026-09-08
+
+Status: Implemented and verified unprivileged; authenticated distribution and
+privileged clean-Host acceptance NOT VERIFIED. Release guest shell remains
+NOT AVAILABLE, independently of Host preparation.
+
+Implemented deterministic unsigned `moos-host` Debian package construction,
+fixed installed first-run coordinator, optional manifest-bound Personal/QEMU
+payload, public-key continuity, exact protected runtime inventory, private
+verified staging snapshot, canonical version/history guard, serialized safe
+repeat, narrow local-user grant and session-refresh guidance. Installed setup
+checks public prerequisites before explained sudo authorization; checkout setup
+cannot prepare itself. Doctor's read-only report contract and local typed
+lifecycle/terminal operations remain compatible. Remote checks stay optional;
+no Gateway grants or pairing credentials are changed.
+
+The initial target is Ubuntu 26.04 amd64 with systemd 257+ and cgroup v2. This
+corrects the earlier 24.04 proposal: the existing component validation requires
+PrivatePIDs, which older systemd cannot provide. CI on Ubuntu 24.04 runs only
+unprivileged tests, not installation acceptance. Production contracts and the
+package/publisher procedure are in HOST_ONBOARDING.md, ADMIN_RELEASES.md and
+distribution/host/README.md. No release private signing identity is needed or
+used in checkout tests; the immutable externally signed archive roundtrip is
+preserved independently of current-source deterministic construction.
+
+Verification: 27 bootstrap tests, 31 operator tests, local CLI, administrator
+release, control-plane installer, Host regressions, daemon, Protocol contract,
+runtime-control, runtime-isolation policy, QEMU launcher, release-profile and
+Personal-identity checks passed. Python compilation, changed shell syntax and
+`git diff --check` passed. The full unsigned package built twice with identical
+bytes. Its corrected artifact was 40,845,024 bytes; its bounded QEMU runtime
+payload was 89,763,616 bytes. These are development-build measurements, not a
+published artifact or installed footprint guarantee.
+
+The existing release smoke and the actual packaged QEMU/library/firmware/image
+smoke both booted Linux 6.18.43 and rejected blank root login. The package boot
+initially revealed a missing efi-e1000.rom; adding that fixed allowlisted firmware
+resolved it. `tests/host_package_smoke.py` preserves this acceptance using the
+package's own runtime instead of the larger development runtime directory.
+This is not usable guest-login or privileged managed-runtime acceptance.
+
+Independent review inspected the actual diff. Findings concerning unlisted
+runtime files, protected existing-release ancestry, canonical version identity,
+installer timeout cleanup and exact-byte staging were resolved; final review
+reported no remaining blocking finding. Root installation/recovery, real user
+grant/session refresh, effective managed limits, production channel/key origin,
+Tailscale sign-in and iPhone acceptance remain NOT VERIFIED. ShellCheck was
+unavailable. No Host installation, trust change, credential change, commit,
+push or publication was performed.
+
+Deferred implementation: release guest login, coordinated upgrades/migrations,
+automated optional Tailscale/Gateway installation and pairing. Next acceptance
+is a deliberately authenticated package on a disposable Ubuntu 26.04 Host,
+including interruption/retry and local lifecycle. BRAIN/MOOS remains absent;
+synchronize its project map, roadmap and architecture with this implemented
+boundary and these pending acceptance items when available.
+
 ## Mobile integration status
 
 - The production iOS application uses the authenticated Gateway session, keeps
@@ -616,6 +673,22 @@ inherently impermissible.
 - F8 AI-agent instances only after multi-instance management is stable.
 
 ## Invariants for every slice
+
+### Canonical artifact verification integration — 2026-09-08
+
+The administrator bundle builder now emits deterministic canonical
+`moos-manifest.json` metadata for current allowlisted members. The normal
+installer authenticates the opaque staged archive first, then applies the
+shared manifest, member-integrity and fixed ADMIN_RELEASE/Linux/x86_64/stable
+policy before extraction. The historical pre-manifest fixture remains an
+explicit regression-only input and is not installable.
+
+The Host package uses the same canonical core and reports only integrity plus
+external `packageMembership` provenance; it does not create local package
+signature evidence. `moos verify` provides a read-only offline inspection with
+fixed trust paths. External package authentication, release signing,
+trust rotation/revocation, real Host installation and guest/iPhone acceptance
+remain unverified and deferred.
 
 - Run existing shell, policy, launcher, and QEMU tests where applicable.
 - Do not regress Bubblewrap, cgroups, no-KVM/no-GPU, no-Host-Home, or default

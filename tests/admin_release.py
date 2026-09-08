@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -23,12 +24,21 @@ TEST_GATEWAY_MEMBERS = {
 }
 TEST_GATEWAY_BINARY = b"\x7fELF" + b"MOOS test release\n"
 sys.path.insert(0, str(REPO_ROOT / "host"))
+import moos_admin_installer as admin  # noqa: E402
 from moos_admin_installer import (  # noqa: E402
     InstallError,
     RELEASE_MEMBERS,
     activate_extracted_release,
     authenticate_to_private_files,
     extract_authenticated_bundle,
+    load_verification_module,
+)
+from moos_verification import (  # noqa: E402
+    ARTIFACT_ADMIN_RELEASE,
+    ROLE_ADMIN_RELEASE,
+    STATUS_VALID,
+    VerificationPolicy,
+    verify_archive_manifest,
 )
 
 
@@ -72,6 +82,9 @@ def main() -> int:
     assert helper_source.startswith("#!/usr/bin/python3 -I\n")
     assert 'Path("/usr/libexec/moos/moos-admin-installer")' in helper_source
     assert 'Path("/etc/moos/trust/admin-release.pem")' in helper_source
+    assert 'Path("/usr/libexec/moos/moos_verification.py")' in helper_source
+    assert "/usr/lib/moos/bootstrap" not in helper_source
+    assert "MODULE_ROOT" not in helper_source
     assert 'parser.add_argument("--key"' not in helper_source
     install_source = helper_source[
         helper_source.index("def install_authenticated_release"):
@@ -80,10 +93,31 @@ def main() -> int:
     authentication_call = install_source.index(
         "staged_bundle, digest = authenticate_to_private_files("
     )
+    verification_anchor_call = install_source.index(
+        "verification_module = load_verification_module()"
+    )
+    assert verification_anchor_call < authentication_call
     extraction_call = install_source.index(
         "extract_authenticated_bundle(staged_bundle, extracted)"
     )
     assert authentication_call < extraction_call
+    try:
+        load_verification_module()
+    except InstallError as error:
+        assert "trusted file" in str(error) or "trusted directory" in str(error)
+    else:
+        raise AssertionError("unprovisioned verification module was accepted")
+    with patch.object(
+        admin,
+        "_require_root_owned_file",
+        side_effect=InstallError("trusted file has unsafe ownership or mode"),
+    ):
+        try:
+            load_verification_module()
+        except InstallError as error:
+            assert "unsafe ownership or mode" in str(error)
+        else:
+            raise AssertionError("unsafe verification module was accepted")
     builder_source = (REPO_ROOT / "scripts/build-admin-release.py").read_text(
         encoding="utf-8"
     )
@@ -145,9 +179,41 @@ def main() -> int:
         assert hashlib.sha256(fixture_data).hexdigest() == (
             "399de03de8faa07f0cd3bdbf01913bb68a0d2ac533f7c0cea23259ccfbb2f7d2"
         )
-        assert first.read_bytes() == fixture_data, (
-            "generated administrator release differs from the externally signed fixture"
+        # The historical signed fixture is immutable regression evidence. It is
+        # intentionally not rewritten into the current canonical format.
+        fixture_source = temporary / "fixture-source"
+        fixture_source.mkdir()
+        fixture_staging = temporary / "fixture-staging"
+        fixture_staging.mkdir(mode=0o700)
+        staged_fixture, _ = authenticate_to_private_files(
+            release_fixture, release_signature, release_public_key, fixture_staging,
+            openssl=openssl,
         )
+        try:
+            extract_authenticated_bundle(staged_fixture, fixture_source)
+        except InstallError as error:
+            assert "no canonical manifest" in str(error)
+        extract_authenticated_bundle(staged_fixture, fixture_source, allow_legacy=True)
+        current_core = fixture_source / "host/moos_verification.py"
+        current_core.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(REPO_ROOT / "host/moos_verification.py", current_core)
+        fixture_generated = temporary / "fixture-generated.tar"
+        result = run(builder, "--source-root", fixture_source, "--output", fixture_generated)
+        assert result.returncode == 0, result.stderr
+        assert fixture_generated.read_bytes() != fixture_data
+        manifest_check = verify_archive_manifest(
+            fixture_generated,
+            policy=VerificationPolicy(
+                expected_artifact_type=ARTIFACT_ADMIN_RELEASE,
+                expected_role=ROLE_ADMIN_RELEASE,
+                expected_platform="linux",
+                expected_architecture="x86_64",
+                expected_channel="stable",
+            ),
+        )
+        assert manifest_check.manifest == STATUS_VALID, manifest_check.as_dict()
+        assert manifest_check.integrity == STATUS_VALID, manifest_check.as_dict()
+        assert manifest_check.policy == "ACCEPT", manifest_check.as_dict()
         assert hashlib.sha256(release_signature.read_bytes()).hexdigest() == (
             "31a22ab36a29d48e2de9370b50d0d165cea6fe333a00fcc3c6bccea63ee781f1"
         )
@@ -155,18 +221,17 @@ def main() -> int:
             "83165476282c93a07bdeff408860825d69e5462b6cccdd8537560a41be2501da"
         )
 
-        release_staging = temporary / "release-staging"
-        release_staging.mkdir(mode=0o700)
-        authenticated_release, release_digest = authenticate_to_private_files(
-            first,
+        legacy_release_staging = temporary / "legacy-release-staging"
+        legacy_release_staging.mkdir(mode=0o700)
+        authenticated_legacy, legacy_digest = authenticate_to_private_files(
+            release_fixture,
             release_signature,
             release_public_key,
-            release_staging,
+            legacy_release_staging,
             openssl=openssl,
         )
-        assert authenticated_release != first
-        assert authenticated_release.read_bytes() == fixture_data
-        assert release_digest == hashlib.sha256(fixture_data).hexdigest()
+        assert authenticated_legacy.read_bytes() == fixture_data
+        assert legacy_digest == hashlib.sha256(fixture_data).hexdigest()
 
         vector_message = temporary / "nist-vector-message"
         vector_message.write_bytes(vector_message_data)
@@ -205,7 +270,7 @@ def main() -> int:
 
         extracted = temporary / "extracted"
         extracted.mkdir()
-        extract_authenticated_bundle(authenticated_release, extracted)
+        extract_authenticated_bundle(fixture_generated, extracted)
         extracted_files = {
             str(path.relative_to(extracted))
             for path in extracted.rglob("*")
@@ -217,7 +282,7 @@ def main() -> int:
         current = temporary / "current"
         invalid_digest_extract = temporary / "extracted-invalid-digest"
         invalid_digest_extract.mkdir()
-        extract_authenticated_bundle(authenticated_release, invalid_digest_extract)
+        extract_authenticated_bundle(fixture_generated, invalid_digest_extract)
         try:
             activate_extracted_release(
                 invalid_digest_extract,
@@ -241,7 +306,7 @@ def main() -> int:
 
         repeated = temporary / "repeated"
         repeated.mkdir()
-        extract_authenticated_bundle(authenticated_release, repeated)
+        extract_authenticated_bundle(fixture_generated, repeated)
         assert activate_extracted_release(
             repeated,
             "a" * 64,
@@ -254,7 +319,7 @@ def main() -> int:
         symlinked_target.symlink_to(final)
         symlinked_extract = temporary / "extracted-symlink"
         symlinked_extract.mkdir()
-        extract_authenticated_bundle(authenticated_release, symlinked_extract)
+        extract_authenticated_bundle(fixture_generated, symlinked_extract)
         try:
             activate_extracted_release(
                 symlinked_extract,
@@ -273,7 +338,7 @@ def main() -> int:
         for digest in ("b" * 64, "c" * 64, "d" * 64):
             next_extracted = temporary / f"extracted-{digest[0]}"
             next_extracted.mkdir()
-            extract_authenticated_bundle(authenticated_release, next_extracted)
+            extract_authenticated_bundle(fixture_generated, next_extracted)
             final = activate_extracted_release(
                 next_extracted,
                 digest,
@@ -301,7 +366,7 @@ def main() -> int:
         )
         for label, candidate, signature in (
             ("bundle", tampered_release, release_signature),
-            ("signature", first, tampered_signature),
+            ("signature", release_fixture, tampered_signature),
         ):
             rejected_release = temporary / f"rejected-{label}"
             rejected_release.mkdir()
@@ -335,7 +400,8 @@ def main() -> int:
 
     print("MOOS administrator release trust-boundary test: PASS")
     print("  NIST public vector: opaque-copied and signature-verified; tamper rejected")
-    print("  signed MOOS fixture: deterministic match, staged authentication, tamper rejected")
+    print("  signed legacy fixture: staged authentication, normal install rejection, tamper rejected")
+    print("  current bundle: canonical manifest metadata and member integrity verified")
     print("  authenticated archive: exact allowlist, regular files only")
     print("  malicious symlink archive: rejected")
     print("  documentation: no privileged checkout entry point")

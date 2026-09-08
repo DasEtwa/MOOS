@@ -50,42 +50,43 @@ moos shell
 moos stop
 ```
 
-Before the CLI is installed, run `./scripts/moos setup` as your normal user
-from this checkout (Python 3 is required). MOOS currently supports the Linux
-x86-64/systemd/cgroup-v2 Host baseline. Setup detects Host prerequisites,
-local access, Personal state, runtime account metadata, administrator-release
-trust metadata, and an installed Gateway. It asks only whether to prepare
-optional iPhone remote status when no Gateway is installed. It never asks for
-resource sizing. `--non-interactive` selects local use without prompting;
-`--remote` explicitly includes remote prerequisites. This choice selects checks
-for this invocation, not a saved setting. An existing Gateway is checked even
-when local use was selected.
+The Host bootstrap now provides a `moos-host` package for **Ubuntu 26.04 amd64,
+systemd 257+ and cgroup v2**. It must arrive through an independently
+authenticated provider. The repository builds unsigned packages; it does not
+yet publish a production Host package channel. Do not install a checkout-built
+package as root to make it trust itself.
 
-Setup is a guided readiness check, not an installer. A new Host still needs an
-administrator to provision the trusted installer and public release key through
-an independently authenticated channel. **This repository does not yet ship a
-turnkey OS package/bootstrap.** The [trusted onboarding assessment](HOST_ONBOARDING.md)
-records the distribution, image-provenance and release-login gates for a real
-installer; it is a proposal, not an available installation path. Setup makes
-that stop point explicit and gives
-these self-contained next-step guides:
+After authenticated installation, run `moos setup` as your normal user. It
+checks this computer, explains the protected preparation and local access grant,
+and asks before requesting administrator permission. It then prepares the
+runtime, local control, and Personal image when included by the provider.
+If asked, log out and back in, then run `moos setup` again. Routine start,
+status and stop need no sudo. A stopped guest is normal; guest boot is not
+certified by preparation alone.
+
+Release guest shell access remains **NOT AVAILABLE** because production root
+stays locked. That does not prevent Host installation or local lifecycle.
+Optional iPhone status remains separate: `moos setup --remote` checks Tailscale
+and the Gateway; pairing must still be explicitly completed and verified.
+
+`moos setup --non-interactive` never prompts or implicitly elevates.
+`moos setup --prepare` explicitly authorizes the installed preparation step;
+noninteractive use requires available noninteractive sudo authorization.
+Checkout copies refuse preparation and retain read-only guidance:
 
 ```sh
+./scripts/moos setup
 moos setup --explain trust
 moos setup --explain local
 moos setup --explain remote
 ```
 
-Ordinary users need no private release-signing key. Release publishers create
-or import their identity only in an isolated trusted signing environment and
-provision only its public key to Hosts; see [ADMIN_RELEASES.md](ADMIN_RELEASES.md).
-No checkout command may receive a private signing key or bootstrap itself as
-root. After authentication, an administrator installs the runtime, stages the
-Personal image, activates local control, and explicitly grants the local
-operator access. Log in again after that grant. See the local guide and the
-administrator procedure below. Onboarding does not alter accounts, images,
-trust anchors, services, Tailscale configuration, or device credentials. Its
-status request can activate the already installed local control service.
+Normal Host users need only public verification material. Release private keys
+remain entirely outside MOOS checkout tooling and normal Host installation.
+Setup does not overwrite trust, existing Personal data or administrator rollback
+state, configure Tailscale, or create device credentials. Details and acceptance
+limits are in [Trusted Host onboarding](HOST_ONBOARDING.md) and the
+[Host package procedure](distribution/host/README.md).
 
 `moos start`, `moos stop`, and `moos shell` use the same local typed operations
 as `moos personal start`, `moos personal stop`, and `moos personal terminal`.
@@ -143,6 +144,8 @@ moos doctor --verbose
 moos doctor --no-color
 moos doctor --report
 moos doctor --expect-fingerprint HEX_DIGITS
+moos verify PATH
+moos verify PATH --signature PATH --json
 ```
 
 The optional fingerprint compares the installed RSA/ECDSA public key's DER
@@ -150,6 +153,13 @@ SHA-256 with a value obtained through a separate trusted channel. Metadata and
 fingerprint checks do not authenticate the installer or revalidate an installed
 release signature. A mismatch requires stopping release installation and
 contacting the administrator/provider, never silently replacing the key.
+
+`moos verify` is a read-only offline check for a canonical MOOS archive or
+artifact directory. It uses only the fixed role-scoped trust paths installed
+by MOOS; it cannot add, replace, import or rotate trust. Human output lists
+manifest, integrity, policy, provenance and rejection reasons; `--json` emits
+the stable structured result. Package membership remains external provenance,
+not a locally authenticated signature.
 
 `--report` prints schema-versioned JSON containing only the curated check IDs,
 states, summaries and next steps. It includes no raw command output, logs,
@@ -191,6 +201,7 @@ presentation aid, not an authenticity check or an instruction to reinstall.
 | host/moos_runtime.py | Fixed Personal lifecycle/status/console adapter |
 | host/moosd.py | Typed local control and terminal service |
 | host/moos_admin_installer.py | Source for the externally provisioned root-owned trust anchor |
+| host/moos_verification.py | Canonical manifest, integrity, policy and public-signature verification core |
 | ADMIN_RELEASES.md | Signed administrator-release bootstrap and trust contract |
 | host/moos-gateway/ | Authenticated, status-only Rust Tailscale Gateway |
 | scripts/build-gateway.sh | Builds the pinned Rust Gateway release binaries |
