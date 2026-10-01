@@ -51,6 +51,12 @@ Networking defaults to disabled. Explicit `--network user` permits QEMU NAT
 and DHCP with no host forwards. No arbitrary QEMU arguments, passthrough,
 shared folders or isolation bypass are accepted.
 
+Native is separate from the Personal control-plane boundary described by
+HOST_GUEST_ISOLATION.md. Bare-metal MOOS authority and Guest Instance isolation
+must be designed separately before Native becomes a managed service Host.
+That existing document is a hash-bound control-plane release input and remains
+unchanged; Native's additional boundaries are recorded here.
+
 Output is `output/native/images/moos-native-x86_64.img`, with generated
 `bzImage`, `rootfs.ext2` (ext4 contents), bootloader payloads and BOOT FAT image.
 The existing default Personal target still uses `output/` and its existing

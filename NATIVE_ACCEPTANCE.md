@@ -60,6 +60,16 @@ successfully. No production validator or fixture was weakened. The privileged
 `tests/managed_personal.py` invocation refused the unprivileged user; its real
 systemd integration was not run as root and is NOT VERIFIED in this slice.
 
+The first pushed CI run caught a source-digest mismatch after a final Native
+paragraph had been added to the hash-bound HOST_GUEST_ISOLATION.md. That
+paragraph was moved to NATIVE.md and the bundled document restored byte-for-byte
+to its reviewed version. Manifest pins, public signed fixtures and validation
+remain unchanged. The prior local regression runs preceded that final paragraph;
+Focused `runtime_isolation`, `control_plane_installer`, `admin_release`,
+`release_profile`, `host_regressions` and `native_config` tests passed again.
+`scripts/build-admin-release.py` also built the canonical unsigned bundle
+successfully. GitHub CI status is recorded on the PR separately.
+
 ## Observed Native N1 evidence — 2026-10-01
 
 The complete Native Buildroot build succeeded under Windows/WSL2 Ubuntu.
@@ -129,7 +139,7 @@ The acceptance VM allocation is 256 MiB, not a measured hardware RAM minimum.
 ### Source scope
 
 Changed: `.github/workflows/host.yml`, `README.md`, `STEPS.md`,
-`HOST_GUEST_ISOLATION.md`, `NATIVE.md`, `NATIVE_ACCEPTANCE.md`,
+`NATIVE.md`, `NATIVE_ACCEPTANCE.md`,
 `configs/moos_native_x86_64_defconfig`, `scripts/build.sh`,
 `scripts/native-post-build.sh`, `scripts/native-post-image.sh`,
 `scripts/run-native-qemu.sh`, `system/native/genimage.cfg`,
