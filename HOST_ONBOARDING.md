@@ -1,148 +1,156 @@
-# Trusted Host onboarding — implementation gate
+# Trusted Host bootstrap and first-run setup
 
-Status: design proposal; not an installed or published capability.
+The bootstrap implementation targets **Ubuntu 26.04 amd64, systemd 257+ and
+unified cgroup v2**. It produces an unsigned Debian package and implements
+protected first-run preparation after independently authenticated installation.
+A production package channel and real clean-Host installation are NOT VERIFIED.
+Release guest login is NOT AVAILABLE; it does not block Host preparation.
 
-The requested end state is an authenticated MOOS installation followed by
-`moos setup`, one explained administrator authorization, and ordinary local
-`start`, `status`, `shell`, and `stop` operations. The current repository cannot
-yet deliver that end state. Do not label the existing diagnostic setup or an
-unsigned package as a completed installation.
+## User path
 
-## Observed prerequisites, 2026-09-07
+Obtain `moos-host` through an independently authenticated provider and install
+it using the OS package manager. No production repository URL is supplied by
+this checkout. A locally built package must not authenticate its own origin.
 
-Inspection reflects the repository implementation and tests reviewed on
-2026-09-07, including the merged operator UX stabilization. That repository
-state is not a published Host distribution.
+Run `moos setup` from the normal local account. Setup checks public package
+integrity and Host prerequisites before offering protected preparation. It
+explains that administrator permission prepares protected components and grants
+this account local control. On confirmation, it invokes only the fixed installed
+coordinator through sudo. No source paths, executable arguments, keys or target
+usernames are accepted by that operation.
 
-| Requirement | Current implementation | Missing acceptance |
-| --- | --- | --- |
-| Bootstrap authenticity | `host/moos_admin_installer.py` requires the fixed installed helper and protected public key; `ADMIN_RELEASES.md` requires independent provisioning. | A publisher-controlled authenticated Host distribution channel and public trust material. |
-| Host payload | `scripts/build-admin-release.py` creates a deterministic unsigned archive; the installed helper verifies its detached signature before parsing. | A published, authenticated release selected by a defined distribution version policy. |
-| Personal image | `scripts/stage-instance.sh` copies a separately supplied kernel/rootfs and QEMU runtime; these are absent from `RELEASE_MEMBERS`. | Authenticated image/runtime provenance and an exact supported runtime dependency layout. |
-| Local control | Existing authenticated scripts install the runtime and control plane; group membership grants the typed local API. | A narrow installed coordinator, explicit local-user grant, safe repeat, interrupted-install and clean-Host acceptance. |
-| Guest login | The release defconfig disables root login; `validate-release-rootfs.py` requires a locked root credential. The terminal API forwards the existing serial console. | A reviewed Personal login mechanism; a running release guest does not imply a usable shell. |
-| Optional remote status | Tailscale state checks and status-only Gateway authentication exist. | Guided installation/pairing and real device acceptance; neither is needed for local use. |
+Noninteractive setup never prompts or elevates implicitly. `moos setup --prepare`
+is an explicit preparation request; without an interactive terminal it uses
+sudo's noninteractive authorization mode. `--prepare` is refused by checkout
+copies. `moos doctor` remains read-only, with its existing report schema.
 
-## Proposed smallest distribution boundary
+Preparation installs the runtime identity and local control, stages Personal
+when supplied, and grants only local `moos-control` membership to the validated
+sudo invoker. It never starts the guest automatically. A new group grant needs
+logout/login; setup checks local access again in the refreshed session.
 
-Start with one tested Ubuntu 24.04 amd64 package baseline, matching the current
-Host CI operating system. This is a proposed acceptance target, not evidence
-that the managed runtime works on every Ubuntu installation or Linux distro.
-Keep package-manager logic outside the runtime and Protocol v1.
+A successful preparation records these capabilities separately:
 
-The independently authenticated OS package would own the bootstrap helper,
-public trust material, initial CLI, exact signed administrator payload, and
-an authenticated release-image/runtime payload. Its publisher must establish
-package origin outside the checkout. A locally built `.deb`, a root ownership
-check, a checksum shipped next to the download, or a key copied from the same
-untrusted checkout does not establish that origin.
+- Protected Host preparation completed.
+- Local control reachable, or session refresh needed.
+- Personal image staged, or not supplied by this package.
+- Guest shell NOT AVAILABLE: production root stays locked.
+- Optional remote transport, Gateway health and pairing remain separate checks.
 
-Build tooling should emit deterministic unsigned artifacts only. Artifact
-review and signing happen after the bytes leave the MOOS environment, using
-independently trusted tooling. Only public material and returned signatures
-may enter the distribution. Normal Host users never generate or supply a
-release private key. Checkout tooling must not accept, read, create, copy,
-cache, stage, back up, or use one, including beneath ignored or temporary
-project directories. No publisher key-management workflow is part of setup.
+A receipt records a past preparation step, not current runtime safety or boot
+acceptance. Setup still probes the local protocol and reports a failed Personal
+state. It does not call a staged image a verified boot or usable shell.
 
-Do not publish an installation command until the real authenticated channel,
-public identity, initial version, and supported image/runtime are available.
-This proposal does not authorize provisioning or replacing a trust anchor.
+## Trust and package contents
 
-## Proposed first-run operation
+The [package builder and publisher procedure](distribution/host/README.md)
+produce deterministic unsigned bytes using Python's standard library, OpenSSL
+public-key validation and readelf metadata inspection. No private release key
+is created, accepted, discovered, read, held or used by checkout tooling.
 
-1. The installed CLI checks the supported Host, dependencies, authenticated
-   payload availability, and existing installation state. Checkout setup
-   retains its read-only stop point.
-2. It explains the concrete changes: prepare protected MOOS components and
-   permit this local account to control Personal MOOS. It asks for approval
-   only if these changes are needed, then requests ordinary administrator
-   authorization for one fixed installed operation.
-3. The installed coordinator independently repeats all security checks. It
-   accepts no executable, image, key, source-root, command, or arbitrary user
-   path from the CLI. It uses a validated local administrator-authorized
-   invoker identity for the narrow local-control grant, never an unchecked
-   username or environment variable.
-4. It verifies the fixed signed payload before archive parsing, installs the
-   locked runtime identity, stages only authenticated Personal/runtime data,
-   activates local control through the existing validated staging path, then
-   grants the intended local account access. Failures stop at the failed step.
-5. Safe repeats inspect actual state rather than trusting a completion flag.
-   Existing Personal data, trust, credentials, active services and rollback
-   targets are never silently replaced. Interrupted states require a defined
-   recovery path before another activation.
-6. It explains logout/login when the account grant is not yet effective in
-   the current session. It verifies local control again from the user's
-   session. It reports guest login separately from service or process health.
-7. Only after local preparation does it offer optional iPhone status. Local
-   use remains independent of Tailscale. Remote setup must retain separate
-   transport, Gateway, and unverified pairing states and status-only grants.
+The package contains:
 
-No sudoers rule, remote sudo, remote terminal, arbitrary Host execution, or
-resource-sizing questionnaire is needed. The privileged coordinator must be
-usable only through the trusted installed boundary; invoking checkout code
-with sudo remains forbidden.
+- Fixed installed coordinator and existing administrator-release helper.
+- Bootstrap CLI, protocol module and the shared canonical verification core;
+  the administrator helper imports that core only from its fixed
+  `/usr/libexec/moos/moos_verification.py` trust-anchor path after checking
+  root ownership, mode and ancestry.
+- Public release-key candidate, never an overwrite of the active trust file.
+- Exact administrator archive and a canonical versioned payload manifest.
+- Optionally, both Personal kernel/rootfs and the matching QEMU runtime.
 
-## Release Personal login is a separate blocking decision
+Initial authenticity comes from the independently authenticated OS package or
+equivalent administrator distribution channel. The shared core parses the
+canonical package manifest and checks every member's exact hash and size;
+setup records this as integrity-only `packageMembership` evidence. Protected
+ownership and hashes maintain installed integrity; neither proves its own
+origin, and setup never reports a local package signature as VALID or VERIFIED.
+This is a parallel bootstrap provenance path permitted by Rules v2
+authenticated package membership. Separately distributed administrator updates
+continue to require the existing detached-signature verification path in
+`ADMIN_RELEASES.md`.
 
-Do not unlock root, install a shared password, use a development image, inject
-credentials into the immutable release image, or treat the local console's
-existence as login acceptance. There is currently no guest credential-
-provisioning or authenticated guest-login channel to compose into setup.
+The coordinator initializes the protected public trust file only when absent,
+and refuses a different existing key. Setup never rotates trust. Publisher
+private signing stays outside MOOS; only public material reaches normal Hosts.
 
-A login design must specify the local principal, credential or capability
-lifetime, storage, reboot and reconnect behavior, revocation, and the Guest
-versus Host authority boundary. It must keep root locked in the release image
-and provide real QEMU boot/login, `moos-info`, reconnect and clean-stop evidence.
-Selecting and implementing that mechanism changes the Guest/terminal security
-contract; it cannot be hidden in a packaging script. Until it is implemented,
-setup must explicitly say that release shell access is unavailable.
+Personal and QEMU have the same authenticated package membership as Host code.
+The builder validates the copied release rootfs's locked root credential without
+mounting or running it. It inspects copied QEMU ELF bytes and their transitive
+library requirements, bundles dependencies from the specified Buildroot runtime,
+and includes only fixed x86 firmware. It never executes source QEMU or uses ldd.
+C/C++ system libraries remain OS-package dependencies. ABI and boot acceptance
+must be performed on the declared Host baseline before publication.
 
-## Threat model and acceptance gates
+Ubuntu 24.04 remains an unprivileged CI test environment, not this installer
+baseline. The existing control installer requires `PrivatePIDs`, introduced in
+[systemd 257](https://raw.githubusercontent.com/systemd/systemd/v257/man/systemd.exec.xml).
+The bootstrap checks this dependency instead of weakening isolation.
 
-| Threat | Required protection and evidence |
+## Transactions and recovery
+
+Setup serializes its operation using a protected file lock. Under that lock it
+copies each bounded, regular, single-link payload file into a private protected
+snapshot while checking its manifest digest. The administrator archive, imported
+helper, images and QEMU staging sources subsequently come from that snapshot.
+Package replacement cannot swap those inputs after verification.
+
+Every traversed runtime directory and member must match the exact inventory:
+extra files, directories, symlinks and hardlinks are refused before recursive
+staging. Existing administrator releases are also checked through protected
+ancestry and exact member contents before any code is reused as root.
+
+The coordinator pins the highest accepted canonical numeric package version and
+manifest before mutation. Older versions and different payloads under the same
+version are refused even after interruption. This records identity, not setup
+success. No release freshness is inferred from a valid signature alone.
+
+Setup refuses to replace a different active administrator release, existing
+Personal data or mismatched staged QEMU. Reusing the same release does not
+switch pointers or prune rollback targets. Existing matching active local
+control is reused. The component control-plane installer owns its existing
+activation/rollback transaction; the coordinator does not kill it with an outer
+timeout that would bypass its rollback traps.
+
+There is no global destructive rollback. A failed or interrupted run may leave
+protected trust, a locked runtime account, staged release/image or local control
+prepared. Rerunning the same package verifies actual state and resumes the
+remaining steps. Foreign or inconsistent state is refused and preserved for
+administrator investigation. Account grants are never silently revoked. This
+is first-run preparation, not an update, migration or repair framework.
+
+## Threat model
+
+| Threat | Implemented boundary |
 | --- | --- |
-| Malicious checkout | No privileged execution/import; package provenance established independently; fixed installed entry points. |
-| PATH/environment injection | Fixed trusted executables, isolated Python, clean subprocess environment and working directory; hostile-environment tests. |
-| Symlink/hardlink races and writable parents | Protected ancestry and descriptor-based bounded reads/copies; tests for changed sources, links, unsafe parents and special files. |
-| Tampered or partial package/payload | OS-channel authentication plus exact payload verification before parsing or activation; tamper and truncation tests. |
-| Trust-anchor replacement | Reject unexpected existing trust; no setup repair or rotation. Package upgrades need an explicit key-continuity contract. |
-| Privilege escalation and group overreach | Validate the intended local invoker; grant only typed local-control membership after authorization; no broad sudo rule. |
-| Interrupted installation | Serialize activation, retain prior state, verify stage boundaries and test interruption/repeat at each mutation. |
-| Stale signed release | Define distribution version/freshness selection. Existing digest/signature verification alone permits historical signed releases; retain deliberate administrator rollback. |
-| Private-key handling | No private key in checkout tooling or artifacts. Verification tests consume public material and externally signed fixtures only. |
-| Credential leakage | Curated diagnostics, no raw credential-store reads or pairing secrets in reports/logs. |
-| Remote privilege expansion | Tailscale remains optional transport; preserve per-device authentication, revocation, and status-only Gateway/daemon enforcement. |
+| Malicious checkout | Fixed installed entry points; checkout preparation refused; no root import or execution of checkout code. |
+| PATH/environment injection | Python isolation, fixed sudo and helper paths, clean subprocess environment and working directory. |
+| Writable parents, symlinks, hardlinks | Protected ancestry, bounded no-follow file reads, exact tree inventory and stable-read checks. |
+| Package/payload tampering | External package authenticity prerequisite; installed digests checked during private copying before extraction/activation. |
+| Trust replacement | Public candidate remains separate from active trust; any existing difference fails closed. |
+| Excess local privileges | Sudo-authorized local invoker, ordinary local-account validation, narrow group grant; no sudoers modification. |
+| Partial installation | Serialized setup, version pin, private snapshot, component rollback, actual-state repeat checks; no false completion receipt. |
+| Stale release replay | Canonical version and manifest continuity; no implicit switch of an existing different administrator release. |
+| Private-key handling | Public-only build inputs and externally signed immutable test fixtures; no release signing inside tooling. |
+| Credential leakage | Curated setup errors, no device-store reads or pairing creation, no raw helper output in reports. |
+| Remote privilege expansion | Gateway/Protocol unchanged; optional transport checks never grant remote lifecycle, terminal or sudo. |
 
-`tests/admin_release.py` uses immutable NIST public verification material and no
-private signing identity. An externally signed immutable MOOS test bundle now
-binds deterministic archive creation to opaque staging, signature verification,
-authenticated extraction, activation and rollback. Valid and tampered NIST
-verification handling and malicious-member rejection remain covered. The test
-fixture is not a production publisher identity and does not substitute for
-authenticated bootstrap-channel or real Host acceptance evidence.
+## Verification scope and next steps
 
-The implementation gate requires the publisher/channel trust input, an
-authenticated Personal/runtime distribution design, and a reviewed guest-login
-contract. Missing external trust material blocks only operations and acceptance
-that require it; it does not block implementing the missing bootstrap capability
-or verified work up to that boundary. No new trust architecture is established
-by this proposal.
+`tests/host_bootstrap.py` covers package structure/determinism, tamper and missing
+inputs, public trust continuity, unsafe links/ancestry, canonical versions,
+private snapshots, persisted interruption/retry and locking, current-release
+reuse, local grants, command ordering, and fixed CLI handoff. Its package-layout
+fixture uses inert test Gateway bytes; it does not install them. Existing
+administrator tests preserve the full externally signed archive roundtrip and
+also independently build the current source twice for determinism.
 
-## Required evidence before completion
+Unprivileged checks do not establish production distribution authenticity,
+package installation, root/systemd activation, real grants or session refresh,
+managed resource behavior, or iPhone acceptance. Those require their real
+external environments. A future release-login mechanism and automated optional
+Tailscale/Gateway installation or device pairing are not implemented here.
 
-Exercise clean, partial and configured Hosts; missing dependencies/bootstrap;
-safe repeat; image present/missing; local grant and session refresh; tamper,
-interruption and rollback; hostile paths/environment; absence of key handling
-and leakage; and ordinary local commands after setup. Preserve existing
-runtime, isolation, daemon and Protocol tests. Test optional transport states
-without treating missing device-store access as no paired devices.
-
-Actual package installation, managed service activation, guest login, and
-remote device acceptance require their respective integration evidence.
-Unprivileged tests and package inspection do not substitute for those runs.
-Publication and real Host changes remain separately authorized actions.
-
-BRAIN/MOOS is unavailable in this checkout. Its README, ROADMAP and
-ARCHITECTURE need to retain these open onboarding gates when synchronized;
-do not mark this proposal or consumer onboarding complete.
+BRAIN/MOOS is unavailable in this checkout. Synchronize its README, ROADMAP and
+ARCHITECTURE with this package/coordinator boundary and the still-open external
+acceptance and release-login work when available.

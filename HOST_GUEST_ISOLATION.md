@@ -272,3 +272,17 @@ silently fall back to it.
 
 Until those items exist, MOOS has a safe local QEMU baseline, not a complete
 production-grade multi-Instance host manager.
+
+## Packaged first-run preparation
+
+The optional authenticated Host package supplies the fixed first-run coordinator
+in `HOST_ONBOARDING.md`. It stages package-authenticated Personal and QEMU data
+from a private verified snapshot, using the existing runtime-identity validation,
+sandbox and resource limits. Exact runtime inventories reject extra files and
+links before recursive copying. It grants only the existing local control group
+after local administrator authorization. There is no Guest/Host channel change,
+remote operation, automatic guest start or release-root login change.
+
+Ubuntu 26.04 amd64 with systemd 257+ is the initial bootstrap target; older
+systemd cannot supply the existing component installer's PrivatePIDs validation.
+Clean-Host activation and managed acceptance for this package remain NOT VERIFIED.

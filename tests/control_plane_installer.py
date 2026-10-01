@@ -17,6 +17,7 @@ INSTALLER = REPO_ROOT / "scripts" / "setup-control-plane.sh"
 SOURCES = (
     "configs/control-plane-manifest.sha256",
     "host/moos_protocol.py",
+    "host/moos_verification.py",
     "host/moos_runtime.py",
     "host/moosd.py",
     "scripts/moos",
@@ -178,6 +179,7 @@ def main() -> int:
         release = root / "release"
         release.mkdir()
         shutil.copy2(REPO_ROOT / "host/moos_protocol.py", release / "moos_protocol.py")
+        shutil.copy2(REPO_ROOT / "host/moos_verification.py", release / "moos_verification.py")
         shutil.copy2(REPO_ROOT / "host/moos_runtime.py", release / "moos_runtime.py")
         shutil.copy2(REPO_ROOT / "host/moosd.py", release / "moosd.py")
         shutil.copy2(REPO_ROOT / "scripts/moos", release / "moos")

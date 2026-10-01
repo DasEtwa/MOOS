@@ -53,6 +53,17 @@ from moos_protocol import (  # noqa: E402
     parse_control_response,
     parse_terminal_response,
 )
+from moos_verification import (  # noqa: E402
+    ARTIFACT_HOST_PACKAGE,
+    PACKAGE_MANIFEST_NAME,
+    PROVENANCE_PACKAGE_MEMBERSHIP,
+    RESULT_INTEGRITY_ONLY,
+    RESULT_VERIFIED,
+    ROLE_HOST_RELEASE,
+    VerificationPolicy,
+    verify_artifact,
+    verify_directory_artifact,
+)
 
 
 DEFAULT_SOCKET = Path("/run/moos/moosd.sock")
@@ -65,13 +76,14 @@ Personal MOOS is your small Linux home on this computer.
 
   moos setup            See what is ready and what to do next
   moos doctor           Find out what needs attention
+  moos verify ARTIFACT  Verify a local MOOS artifact offline
   moos status --human   See whether Personal MOOS is running
   moos start            Start Personal MOOS
   moos stop             Stop Personal MOOS
   moos shell            Open Personal MOOS's console (login required)
   moos help             Show this guide
 
-New here? Start with moos setup. These checks do not change your settings.
+New here? Start with moos setup. Installed Host preparation asks before making changes.
 Your iPhone can view status; start, stop and shell work on this computer.
 Guest login details: moos setup --explain local
 
@@ -89,19 +101,36 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--socket", type=Path, default=DEFAULT_SOCKET,
                         help="advanced: select the local control socket")
     parser.add_argument("command", nargs="?", default="help", choices=(
-        "setup", "doctor", "help", "status", "start", "stop", "shell", "personal"))
-    parser.add_argument("action", nargs="?", choices=("status", "start", "stop", "terminal"))
+        "setup", "doctor", "verify", "help", "status", "start", "stop", "shell", "personal"))
+    parser.add_argument("action", nargs="?")
+    parser.add_argument("artifact", nargs="?", type=Path)
     parser.add_argument("--human", action="store_true", help="readable lifecycle/status output")
     parser.add_argument("--verbose", action="store_true", help="setup/doctor: show individual technical observations")
     parser.add_argument("--no-color", action="store_true", help="use plain text status labels without emoji")
     parser.add_argument("--report", action="store_true", help="doctor: curated JSON, no raw diagnostics")
+    parser.add_argument("--json", action="store_true", help="verify: emit structured JSON")
+    parser.add_argument("--signature", type=Path, help="verify: detached signature (defaults to ARTIFACT.sig)")
     parser.add_argument("--remote", action="store_true", help="setup/doctor: require remote status checks")
+    parser.add_argument("--prepare", action="store_true", help="setup: authorize protected Host preparation from the installed package")
     parser.add_argument("--non-interactive", action="store_true", help="setup: do not prompt; local by default")
     parser.add_argument("--explain", choices=("trust", "local", "remote"), help="setup: explain a next step")
     parser.add_argument("--expect-fingerprint", type=fingerprint_argument,
                         help="setup/doctor: expected public-key SHA-256 DER fingerprint from a trusted source")
     args = parser.parse_args()
     diagnostic = args.command in {"setup", "doctor"}
+    if args.command == "verify":
+        if args.action is None or args.artifact is not None:
+            parser.error("verify requires exactly one artifact path")
+        args.artifact = Path(args.action)
+        args.action = None
+    elif args.action not in {None, "status", "start", "stop", "terminal"}:
+        parser.error("invalid action")
+    if args.signature is not None and args.command != "verify":
+        parser.error("--signature requires verify")
+    if args.json and args.command != "verify":
+        parser.error("--json requires verify")
+    if args.prepare and (args.command != "setup" or args.explain or args.socket != DEFAULT_SOCKET):
+        parser.error("--prepare requires setup with the default local connection and no --explain")
     if args.action is not None and args.command != "personal":
         parser.error("only personal accepts an action")
     if (args.remote or args.expect_fingerprint) and not diagnostic:
@@ -117,6 +146,22 @@ def parse_args() -> argparse.Namespace:
     if args.human and args.command not in {"status", "personal", "start", "stop"}:
         parser.error("--human requires a status or lifecycle command")
     return args
+
+
+def verify_command(args: argparse.Namespace) -> int:
+    result = verify_artifact(args.artifact, signature_path=args.signature)
+    data = result.as_dict()
+    if args.json:
+        print(json.dumps(data, indent=2, sort_keys=True))
+    else:
+        for field in ("result", "manifest", "integrity", "signature", "policy", "provenance",
+                      "artifactType", "publisher", "role", "platform", "architecture", "channel", "version"):
+            print(f"{field}: {data[field]}")
+        if data["issues"]:
+            print("issues:")
+            for issue in data["issues"]:
+                print(f"  - {issue['stage']}: {issue['code']}: {issue['message']}")
+    return 0 if result.result == RESULT_VERIFIED else 1
 
 
 def fingerprint_argument(value: str) -> str:
@@ -286,7 +331,10 @@ independently authenticated OS package or administrator-controlled channel:
   /usr/libexec/moos/moos-admin-installer
   /etc/moos/trust/admin-release.pem
 Verify the public-key fingerprint through a separate trusted channel.
-There is currently no packaged, automatic first-install bootstrap in this repo.
+The moos-host package now provides first-run preparation on Ubuntu 26.04.
+Obtain it through an independently authenticated provider; a checkout-built
+package does not establish trust. No public production channel is supplied here.
+After installation, moos setup explains and authorizes the protected preparation.
 Do not run checkout installers with sudo or copy them into trusted paths.
 
 If you publish your own releases, create a new RSA/ECDSA signing identity or
@@ -301,7 +349,7 @@ Administrator procedure: ADMIN_RELEASES.md, Build and sign / Authenticate and in
 Compare a trusted SHA-256 fingerprint of the DER public key with:
   moos doctor --expect-fingerprint <64 hexadecimal digits>
 This compares the public key only; the helper's authenticity still requires
-independent provisioning. Setup never creates, imports, or searches for keys.
+independent provisioning. Setup never creates or searches for signing identities.
 """,
     "local": """Local MOOS — the next installation steps
 
@@ -309,6 +357,10 @@ Installation and access for your account need an administrator-authorized step.
 If you manage this computer, follow the administrator procedure below; otherwise
 ask the person who manages it. Setup does not grant itself permission.
 For a missing Host requirement, moos doctor --verbose lists the exact checks.
+If MOOS arrived as the authenticated moos-host package, run moos setup.
+It guides protected preparation and your local access grant; no manual commands
+below are needed. Log out and back in if it asks, then run setup again.
+For a separately provisioned administrator installation:
 First complete release trust: moos setup --explain trust
 Then ask the administrator to use the authenticated release, in this order:
   1. Install the locked runtime account and fixed runtime launcher.
@@ -636,6 +688,33 @@ def collect_checks(probe: HostProbe, socket_path: Path, *, remote: bool = False,
     add("release", "Security / trust", "info" if release == "present" else "unknown" if release == "unknown" else "issue",
         "Active administrator release pointer has intact metadata" if release == "present" else "Active administrator release is missing, unsafe, or inaccessible",
         "Pointer metadata is not a signature revalidation." if release == "present" else "Ask the administrator to authenticate a signed release through the independently provisioned installer. Run moos setup --explain trust.")
+    package_manifest = BOOTSTRAP_PAYLOAD / PACKAGE_MANIFEST_NAME
+    if package_manifest.is_file():
+        package = verify_directory_artifact(
+            BOOTSTRAP_PAYLOAD,
+            manifest_name=PACKAGE_MANIFEST_NAME,
+            provenance=PROVENANCE_PACKAGE_MEMBERSHIP,
+            policy=VerificationPolicy(
+                expected_artifact_type=ARTIFACT_HOST_PACKAGE,
+                expected_role=ROLE_HOST_RELEASE,
+                expected_platform="linux",
+                expected_architecture="x86_64",
+                expected_channel="stable",
+            ),
+        )
+        if package.result == RESULT_INTEGRITY_ONLY:
+            add("bootstrap", "Security / trust", "info",
+                "Installed bootstrap payload integrity matches its canonical manifest; external package provenance is not established locally",
+                "The authenticated OS package channel remains the source of package provenance; local hashes do not replace it.")
+        else:
+            reason = package.issues[0].message if package.issues else "canonical package integrity or policy failed"
+            add("bootstrap", "Security / trust", "issue",
+                "Installed bootstrap payload could not be validated: " + reason,
+                "Restore the MOOS Host package through its independently authenticated provider.")
+    else:
+        add("bootstrap", "Security / trust", "info",
+            "Installed package membership is not available for local observation",
+            "An authenticated OS package channel is required before protected bootstrap.")
     gateway = probe.service("moos-gateway.service")
     check_remote = remote or gateway != "missing"
     if check_remote:
@@ -863,7 +942,149 @@ def choose_remote(input_fn=input, output=print, *, checkout: bool = False) -> bo
             output("Choose 1, 2, or 3. No settings have changed.")
 
 
+BOOTSTRAP_PROGRAM = "/usr/libexec/moos/moos-host-setup"
+BOOTSTRAP_PAYLOAD = Path("/usr/lib/moos/bootstrap")
+
+
+def installed_bootstrap_cli() -> bool:
+    current = Path(__file__).resolve()
+    return (current == BOOTSTRAP_PAYLOAD / "moos" or
+            (current.parent.parent == Path("/usr/lib/moos/control-releases") and current.name == "moos"))
+
+
+def bootstrap_receipt(probe) -> dict | None:
+    """A root-written preparation receipt is evidence of a past step, not health."""
+    path = Path("/usr/lib/moos/bootstrap-state.json")
+    if probe.trusted_file(str(path)) != "present":
+        return None
+    try:
+        with path.open("rb") as source:
+            data = source.read(4097)
+        if len(data) > 4096:
+            return None
+        receipt = json.loads(data)
+        manifest = BOOTSTRAP_PAYLOAD / "manifest.json"
+        if probe.trusted_file(str(manifest)) != "present":
+            return None
+        with manifest.open("rb") as source:
+            content = source.read(65537)
+        if len(content) > 65536 or receipt.get("manifest") != hashlib.sha256(content).hexdigest():
+            return None
+        if receipt.get("result") not in (
+                {"host": "ready", "localGrant": "ready", "personalImage": "ready", "guestShell": "not_available"},
+                {"host": "ready", "localGrant": "ready", "personalImage": "not_available", "guestShell": "not_available"}):
+            return None
+        return receipt["result"]
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def bootstrap_setup(args) -> int | None:
+    """Handoff only to a fixed installed operation; doctor remains read-only."""
+    if args.command != "setup" or args.explain:
+        return None
+    prepare = getattr(args, "prepare", False)
+    if not installed_bootstrap_cli():
+        if prepare:
+            print("[BLOCKED] Host preparation requires MOOS from an authenticated installed package.")
+            print("This checkout cannot install itself. Obtain the Host package from your trusted provider.")
+            return 1
+        return None
+    probe = HostProbe()
+    if probe.trusted_file(BOOTSTRAP_PROGRAM, required_mode=0o111) != "present":
+        print("[BLOCKED] The trusted Host preparation component is missing or unsafe.")
+        print("Restore the MOOS Host package through your trusted provider.")
+        return 1
+    if args.socket != DEFAULT_SOCKET:
+        print("[BLOCKED] First-run preparation uses the default local MOOS connection.")
+        return 1
+    if args.expect_fingerprint and probe.public_fingerprint() != args.expect_fingerprint:
+        print("[BLOCKED] Release trust could not be matched. Stop installing updates; do not replace the key.")
+        return 1
+    checked = probe.command([BOOTSTRAP_PROGRAM, "--check"])
+    if checked is None or checked[0] != 0:
+        print("[BLOCKED] The Host prerequisites or installed package could not be verified.")
+        print("This bootstrap needs Ubuntu 26.04, systemd 257+, and its package dependencies. Run moos doctor --verbose.")
+        return 1
+    receipt = bootstrap_receipt(probe)
+    personal = probe.personal(DEFAULT_SOCKET)
+    accessible = personal in {"running", "stopped", "starting", "stopping", "failed"}
+    if receipt and accessible and not prepare:
+        print("[INFO] Protected Host preparation was completed for this package.")
+        print("[READY] Local control: your account can reach MOOS.")
+        print("[INFO] Personal image: " + ("previously staged; boot is not verified here."
+              if receipt["personalImage"] == "ready" else "not supplied by this package."))
+        print("[INFO] Guest shell: NOT AVAILABLE in the release image; root remains locked.")
+        print("[" + ("BLOCKED" if personal == "failed" else "INFO") + "] Personal MOOS: " + personal + ".")
+        print("Next: moos start, moos status --human, moos stop. Support: moos doctor.")
+        if args.remote:
+            checks = collect_checks(probe, DEFAULT_SOCKET, remote=True)
+            selected = [c for c in checks if c.id in {"gateway", "tailscale", "devices"}]
+            render_checks(selected)
+            if any(c.state in {"issue", "unknown"} for c in selected):
+                return 1
+        return 1 if personal == "failed" else 0
+    if receipt and not accessible and not prepare:
+        try:
+            import grp
+            group = grp.getgrnam("moos-control")
+            import pwd
+            account = pwd.getpwuid(os.getuid())
+            if (group.gr_gid in os.getgrouplist(account.pw_name, account.pw_gid)
+                    and group.gr_gid not in {*os.getgroups(), os.getgid()}):
+                print("[NEEDS ATTENTION] Access is granted. Log out and back in, then run moos setup.")
+                return 1
+        except (KeyError, OSError):
+            pass
+    print("MOOS\ntiny. green. alive.\n\nMOOS can prepare its protected Host components and give this account local control.")
+    print("Administrator permission is needed for that one setup step. Existing Personal data and trust will be preserved.")
+    print("Release guest shell access remains unavailable. Remote status is optional.")
+    interactive = sys.stdin.isatty() and sys.stdout.isatty() and not args.non_interactive
+    if not prepare:
+        if not interactive:
+            print("[NEEDS ATTENTION] Run moos setup interactively, or use moos setup --prepare to authorize preparation.")
+            return 1
+        try:
+            answer = input("Prepare MOOS now? [y/N]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = "no"
+        if answer not in {"y", "yes"}:
+            print("Preparation deferred. No Host changes made.")
+            return 1
+    if probe.trusted_file("/usr/bin/sudo", required_mode=0o111) != "present":
+        print("[BLOCKED] Administrator authorization is unavailable; check the OS package dependencies.")
+        return 1
+    argv = ["/usr/bin/sudo"] + ([] if interactive else ["-n"]) + ["--", BOOTSTRAP_PROGRAM, "--apply"]
+    try:
+        result = subprocess.run(argv, cwd="/", env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C"},
+                                text=True, stdout=subprocess.PIPE, check=False)
+    except (OSError, KeyboardInterrupt):
+        print("[NEEDS ATTENTION] Preparation did not finish. Rerun moos setup to inspect or resume it.")
+        return 1
+    if result.returncode:
+        print("[BLOCKED] Preparation did not finish. Resolve the reported problem, then rerun moos setup.")
+        return 1
+    receipt = bootstrap_receipt(probe)
+    if receipt is None:
+        print("[NEEDS ATTENTION] The preparation result could not be verified. Run moos doctor.")
+        return 1
+    print("[READY] Protected Host preparation completed.")
+    print("[INFO] Personal image: " + ("staged; boot acceptance is not verified here."
+          if receipt["personalImage"] == "ready" else "not supplied by this package."))
+    print("[INFO] Guest shell: NOT AVAILABLE in release images.")
+    accessible = probe.personal(DEFAULT_SOCKET) in {"running", "stopped", "starting", "stopping", "failed"}
+    if accessible:
+        print("[READY] Local control is available. Next: moos start, moos status --human, moos stop.")
+    else:
+        print("[NEEDS ATTENTION] Log out and back in to activate local access, then run moos setup.")
+    print("Optional iPhone status: moos setup --remote. Support: moos doctor.")
+    return 0 if accessible else 1
+
+
 def diagnose(args: argparse.Namespace) -> int:
+    prepared = bootstrap_setup(args)
+    if prepared is not None:
+        return prepared
     # Report mode never adds a presentation-only CLI notice or changes fields.
     checkout = not args.report and checkout_cli_differs()
     if checkout:
@@ -921,6 +1142,8 @@ def main() -> int:
         return 0
     if args.command in {"setup", "doctor"}:
         return diagnose(args)
+    if args.command == "verify":
+        return verify_command(args)
     if args.command == "shell" or (args.command == "personal" and args.action == "terminal"):
         try:
             return terminal(args.socket)

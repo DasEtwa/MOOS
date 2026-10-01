@@ -111,8 +111,14 @@ def main():
         for arguments in (("help",), (), ("--help",)):
             help_result = run_cli(socket_path, *arguments)
             assert help_result.returncode == 0
-            for command in ("setup", "doctor", "start", "stop", "shell"):
+            for command in ("setup", "doctor", "verify", "start", "stop", "shell"):
                 assert "moos " + command in help_result.stdout
+        offline = run_cli(socket_path, "verify", str(Path(temporary) / "missing-artifact"), "--json")
+        assert offline.returncode == 1
+        offline_report = json.loads(offline.stdout)
+        assert offline_report["result"] == "REJECTED"
+        assert offline_report["issues"][0]["code"] == "unsupportedArtifact"
+        assert run_cli(socket_path, "verify").returncode == 2
         for arguments in (("doctor", "--fix"), ("status", "--report"),
                           ("help", "start"), ("status", "--remote"),
                           ("doctor", "--expect-fingerprint", "bad"), ("setup", "start"),
@@ -139,7 +145,15 @@ def main():
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "command":
                 assert isinstance(node.args[0], ast.List)
-                verb = ast.literal_eval(node.args[0].elts[0])
+                first = node.args[0].elts[0]
+                if isinstance(first, ast.Name):
+                    # The installed coordinator adds only a public read-only
+                    # prerequisite probe; --apply is a separate explicit handoff.
+                    assert first.id == "BOOTSTRAP_PROGRAM"
+                    assert len(node.args[0].elts) == 2
+                    assert ast.literal_eval(node.args[0].elts[1]) == "--check"
+                    continue
+                verb = ast.literal_eval(first)
                 assert verb in {"systemctl", "getent", "id", "passwd", "tailscale"}, verb
                 action = ast.literal_eval(node.args[0].elts[1])
                 assert (verb, action) in {("systemctl", "show"), ("getent", "passwd"),

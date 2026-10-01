@@ -42,8 +42,9 @@ continues to accept the documented ECDSA public-key form without generating a
 cryptographic identity inside the checkout.
 
 `moos-admin-release-v1.tar`, its detached `.sig`, and
-`moos-admin-release-v1.pub` form an immutable, externally signed integration
-fixture for the real administrator-release archive format. The archive was
+`moos-admin-release-v1.pub` form an immutable, externally signed historical
+regression fixture for the pre-manifest administrator-release archive format.
+The archive was
 built from repository commit `9ae7795405885cea46293cbfabe21dc335742b55` with
 the normal deterministic builder. Its two Gateway executable members contain
 the same fixed test-only ELF bytes used by `tests/admin_release.py`; every other
@@ -67,8 +68,10 @@ SHA-256: 83165476282c93a07bdeff408860825d69e5462b6cccdd8537560a41be2501da
 SubjectPublicKeyInfo DER SHA-256: c9e954a07c6b561f3eb92a5bee6ac7343b05c0e701043dd310b645d69e50fd42
 ```
 
-The test first requires a newly generated archive to match the fixture archive
-byte for byte. Only then may the detached signature authenticate that generated
-archive. Extraction consumes the returned private staged copy, preserving the
-production authentication-before-parsing order. This fixture is test evidence,
-not a production publisher identity or bootstrap trust anchor.
+The test authenticates the immutable fixture, reconstructs its historical source
+only through an explicit legacy regression path, and verifies that the current
+builder emits a different canonical-manifest archive. Current-source
+deterministic construction and canonical metadata/integrity are tested
+separately. The historical fixture is never installable by the normal helper;
+it is test evidence, not a production publisher identity or bootstrap trust
+anchor.

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import os
 import re
 import shutil
@@ -22,6 +23,7 @@ from pathlib import Path
 
 
 TRUSTED_PROGRAM = Path("/usr/libexec/moos/moos-admin-installer")
+VERIFICATION_MODULE = Path("/usr/libexec/moos/moos_verification.py")
 TRUSTED_KEY = Path("/etc/moos/trust/admin-release.pem")
 RELEASE_ROOT = Path("/usr/lib/moos/admin-releases")
 CURRENT_LINK = Path("/usr/lib/moos/admin-current")
@@ -32,12 +34,18 @@ MAX_BUNDLE_BYTES = 160 * 1024 * 1024
 MAX_SIGNATURE_BYTES = 64 * 1024
 MAX_MEMBER_BYTES = 64 * 1024 * 1024
 RELEASE_DIGEST = re.compile(r"[0-9a-f]{64}")
+MANIFEST_NAME = "moos-manifest.json"
+ARTIFACT_ADMIN_RELEASE = "ADMIN_RELEASE"
+ROLE_ADMIN_RELEASE = "ADMIN_RELEASE"
+PROVENANCE_SIGNATURE = "detachedSignature"
+STATUS_VALID = "VALID"
 
 RELEASE_MEMBERS = {
     "GATEWAY.md": 0o644,
     "HOST_GUEST_ISOLATION.md": 0o644,
     "configs/control-plane-manifest.sha256": 0o644,
     "host/moos_protocol.py": 0o644,
+    "host/moos_verification.py": 0o644,
     "host/moos_runtime.py": 0o644,
     "host/moosd.py": 0o644,
     "scripts/moos": 0o755,
@@ -54,10 +62,40 @@ RELEASE_MEMBERS = {
     "target/release/moos-gateway": 0o755,
     "target/release/moos-gateway-device": 0o755,
 }
+RELEASE_ARCHIVE_MEMBERS = set(RELEASE_MEMBERS) | {MANIFEST_NAME}
+LEGACY_RELEASE_MEMBERS = set(RELEASE_MEMBERS) - {"host/moos_verification.py"}
 
 
 class InstallError(RuntimeError):
     """A fail-closed administrator-release installation error."""
+
+
+def load_verification_module(
+    module_path: Path = VERIFICATION_MODULE, *, require_trusted: bool = True
+):
+    """Load the verification core only after validating its trust boundary.
+
+    The non-default path is an explicit test hook; production installation
+    always uses the fixed root-owned module path and its protected ancestry.
+    """
+
+    module_path = Path(module_path)
+    if require_trusted:
+        if module_path != VERIFICATION_MODULE:
+            raise InstallError("administrator verification module path is not fixed")
+        _require_root_owned_file(module_path)
+        _require_root_owned_path(module_path.parent)
+    elif module_path == VERIFICATION_MODULE:
+        raise InstallError("test verification-module injection must use a separate path")
+    spec = importlib.util.spec_from_file_location("moos_installed_verification", module_path)
+    if spec is None or spec.loader is None:
+        raise InstallError(f"trusted verification module is not importable: {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except (ImportError, OSError, SyntaxError) as error:
+        raise InstallError(f"trusted verification module could not be loaded: {module_path}") from error
+    return module
 
 
 def _read_opaque(source: Path, maximum: int) -> bytes:
@@ -189,25 +227,42 @@ def authenticate_to_private_files(
     return staged_bundle, hashlib.sha256(bundle_data).hexdigest()
 
 
-def extract_authenticated_bundle(bundle: Path, destination: Path) -> None:
-    """Extract an already authenticated archive using an exact allowlist."""
+def extract_authenticated_bundle(
+    bundle: Path, destination: Path, *, allow_legacy: bool = False
+) -> None:
+    """Extract an authenticated archive using an exact allowlist.
+
+    ``allow_legacy`` is an explicit regression-only escape hatch for the
+    historical pre-manifest fixture.  Normal installation never enables it.
+    """
 
     seen = set()
+    archive_seen = set()
+    manifest_seen = False
     with tarfile.open(bundle, mode="r:") as archive:
         members = archive.getmembers()
         for member in members:
-            if member.name in seen or member.name not in RELEASE_MEMBERS:
+            if member.name in archive_seen or member.name not in RELEASE_ARCHIVE_MEMBERS:
                 raise InstallError(
                     f"administrator release has an unexpected member: {member.name}"
                 )
-            seen.add(member.name)
+            archive_seen.add(member.name)
             if not member.isfile() or member.size > MAX_MEMBER_BYTES:
                 raise InstallError(f"administrator release member is unsafe: {member.name}")
-        if seen != set(RELEASE_MEMBERS):
-            missing = sorted(set(RELEASE_MEMBERS) - seen)
+            if member.name == MANIFEST_NAME:
+                manifest_seen = True
+            else:
+                seen.add(member.name)
+        if not manifest_seen and not allow_legacy:
+            raise InstallError("administrator release has no canonical manifest")
+        required_members = LEGACY_RELEASE_MEMBERS if allow_legacy and not manifest_seen else set(RELEASE_MEMBERS)
+        if seen != required_members:
+            missing = sorted(required_members - seen)
             raise InstallError("administrator release is incomplete: " + ", ".join(missing))
 
         for member in members:
+            if member.name == MANIFEST_NAME:
+                continue
             target = destination / member.name
             target.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
             parent = target.parent
@@ -391,6 +446,7 @@ def install_authenticated_release(bundle: Path, signature: Path) -> Path:
     _require_root_owned_path(OPENSSL.parent)
 
     _require_root_owned_path(Path("/usr/lib"))
+    verification_module = load_verification_module()
     if not RELEASE_ROOT.parent.exists():
         RELEASE_ROOT.parent.mkdir(mode=0o755)
     _require_root_owned_path(RELEASE_ROOT.parent)
@@ -404,6 +460,27 @@ def install_authenticated_release(bundle: Path, signature: Path) -> Path:
         staged_bundle, digest = authenticate_to_private_files(
             bundle, signature, TRUSTED_KEY, work_root
         )
+        verification = verification_module.verify_archive_manifest(
+            staged_bundle,
+            policy=verification_module.VerificationPolicy(
+                expected_artifact_type=verification_module.ARTIFACT_ADMIN_RELEASE,
+                expected_role=verification_module.ROLE_ADMIN_RELEASE,
+                expected_platform="linux",
+                expected_architecture="x86_64",
+                expected_channel="stable",
+            ),
+            provenance=verification_module.PROVENANCE_SIGNATURE,
+            require_manifest_name=MANIFEST_NAME,
+        )
+        if verification.manifest != STATUS_VALID:
+            detail = verification.issues[0].message if verification.issues else "invalid manifest"
+            raise InstallError(f"administrator release manifest rejected: {detail}")
+        if verification.integrity != STATUS_VALID:
+            detail = verification.issues[0].message if verification.issues else "invalid payload integrity"
+            raise InstallError(f"administrator release payload rejected: {detail}")
+        if verification.policy != "ACCEPT":
+            detail = verification.issues[0].message if verification.issues else "manifest policy rejected"
+            raise InstallError(f"administrator release policy rejected: {detail}")
         extract_authenticated_bundle(staged_bundle, extracted)
         return activate_extracted_release(
             extracted,
