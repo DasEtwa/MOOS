@@ -7,6 +7,19 @@ the mobile MVP is built around one Personal MOOS system.
 
 ## Verified foundation
 
+The separate Native sequence is defined in [NATIVE.md](NATIVE.md): N0, N1,
+N2, N3, N4, P1, P2, U1, U2, H1, H2, W1, M1. This does not reorder or redefine
+the historical Personal/mobile slices below. N0 defines the backend-neutral
+contract; N1 adds only the release disk/bootloader foundation. N2 persistence
+and recovery must precede a Native installer. Native acceptance evidence is
+recorded separately in [NATIVE_ACCEPTANCE.md](NATIVE_ACCEPTANCE.md).
+
+Native N0/N1 status: complete on the Native work branch. Observed acceptance:
+full Windows/WSL2 build, QEMU BIOS and UEFI disk boot, serial identity/version,
+DHCP, locked release-root rejection, clean emulator termination, non-bootable
+disk rejection and identical repeated image generation. Physical hardware,
+installer, persistence/recovery, packages and A/B remain NOT VERIFIED/deferred.
+
 Complete before this roadmap: Buildroot x86_64 Linux 6.18.43 LTS, BusyBox 1.38.0,
 QEMU boot/login/networking, MOOS utilities, reboot/poweroff smoke tests,
 rootless Bubblewrap isolation, deny-by-default networking, dedicated

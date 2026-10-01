@@ -7,6 +7,13 @@ unsafe for remote exposure.
 
 ## Current default boundary
 
+Native N1 is a separate image target, not a replacement for the Personal
+control-plane boundary. Its development disk-boot runner preserves rootless
+isolation and readonly snapshot backing, exposes only serial, and permits NAT
+only explicitly. Bare-metal MOOS authority and Guest Instance isolation must
+be designed separately before Native becomes a managed service Host. See
+[NATIVE.md](NATIVE.md); N1 introduces no installer or generic Host shell API.
+
 The standard serial launcher is:
 
 ~~~bash
