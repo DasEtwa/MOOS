@@ -1,6 +1,6 @@
 # MOOS rules
 
-Rules version: 2.0
+Rules version: 2.1
 Status: normative project constitution
 
 These rules define the project-wide security, trust, architecture, release,
@@ -1017,7 +1017,65 @@ When convenience and a trust boundary conflict, redesign the workflow.
 
 ---
 
-## 33. Architecture may evolve
+## 33. MOOS is the platform, not the machine
+
+MOOS MUST preserve deployment portability across replaceable platform backends.
+
+A native or bare-metal MOOS installation is a first-class deployment target.
+It MUST NOT become the definition of MOOS itself.
+
+The architecture MUST remain capable of supporting, without redefining the
+core product model:
+
+- native or bare-metal MOOS on supported hardware;
+- MOOS on Windows through WSL2 or another explicitly reviewed Windows backend;
+- MOOS on macOS through virtualization or another explicitly reviewed macOS
+  backend;
+- additional backends that preserve the same authority and isolation
+  properties.
+
+Supporting one backend first for implementation or acceptance is allowed.
+A first-supported backend MUST NOT be treated as the only permitted future
+architecture.
+
+Core product concepts MUST remain independent from backend-specific machinery
+where that machinery is replaceable. This includes, as applicable:
+
+- user-facing `moos` CLI semantics;
+- Protocol operations and stable identifiers;
+- package metadata and portable package/runtime ABI;
+- durable configuration and user state;
+- service and application identities.
+
+Backend-specific details such as EFI, boot loaders, block-device names,
+systemd unit names, WSL lifecycle commands, VM APIs, hypervisor paths, or
+host-specific filesystem locations MUST NOT leak into those stable concepts
+unless an explicitly platform-specific capability requires them.
+
+Platform-specific implementation SHOULD live behind explicit backend or
+provider boundaries.
+
+System installation, boot, low-level update, recovery, networking, hardware
+access, and virtualization MAY differ by backend. Those differences MUST
+preserve the applicable security, trust, persistence, and rollback rules.
+
+A capability that is not implemented or verified on a backend MUST be reported
+honestly as `NOT AVAILABLE`, `NOT CONFIGURED`, or `NOT VERIFIED`. MOOS MUST
+NOT silently change the meaning of a stable operation merely to make a backend
+appear supported.
+
+Portable MOOS packages SHOULD target a declared MOOS runtime ABI rather than a
+specific Host implementation. A package that genuinely requires one backend
+MUST declare that platform requirement instead of relying on an implicit
+machine assumption.
+
+This rule exists so that adding a native MOOS Host OS does not demote Windows,
+macOS, WSL, or virtualized deployments into accidental second-class
+architectures.
+
+---
+
+## 34. Architecture may evolve
 
 These rules intentionally permit MOOS to grow.
 
@@ -1039,7 +1097,7 @@ Historical behavior is evidence, not permanent architecture.
 
 ---
 
-## 34. Rules changes
+## 35. Rules changes
 
 `rules.md` itself may evolve.
 
@@ -1062,7 +1120,7 @@ propose the rule change explicitly and review it as architecture.
 
 ---
 
-## 35. Completion principle
+## 36. Completion principle
 
 A MOOS change is complete when the capability it claims to implement is:
 
@@ -1108,3 +1166,6 @@ If the rest of this document is forgotten, preserve these:
     implementation up to that boundary.**
 12. **Security boundaries may evolve deliberately; they are never weakened
     silently for convenience.**
+13. **MOOS is the platform, not the machine; native, WSL, macOS virtualization,
+    and future backends must remain replaceable deployment choices around stable
+    core concepts.**
