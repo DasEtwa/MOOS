@@ -15,19 +15,26 @@ BUILDROOT_REF='cb857ba4c87a93e5265a9e4a3f32071abf39e14a'
 BUILDROOT_PATCH_DIR="$MOOS_ROOT/patches/buildroot"
 JOBS=4
 PROFILE='release'
+TARGET='personal'
 
 usage() {
     cat <<'EOF'
-Usage: scripts/build.sh [JOBS] [--profile development|release] [--jobs JOBS]
+Usage: scripts/build.sh [JOBS] [--target personal|native] [--profile development|release] [--jobs JOBS]
 
 The default release profile disables password-based root login and verifies the
 final rootfs image before returning success. The development profile must be
 selected explicitly and keeps the insecure blank local root login.
+Native is release-only and uses a separate output/native tree.
 EOF
 }
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        --target)
+            [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+            TARGET=$2
+            shift 2
+            ;;
         --profile)
             [ "$#" -ge 2 ] || { usage >&2; exit 2; }
             PROFILE=$2
@@ -65,6 +72,27 @@ case "$PROFILE" in
         echo 'error: --profile must be development or release' >&2
         exit 2
         ;;
+esac
+case "$TARGET" in
+    personal) ;;
+    native)
+        [ "$PROFILE" = 'release' ] || {
+            echo 'error: Native supports only the locked release profile' >&2
+            exit 2
+        }
+        [ "$(id -u)" -ne 0 ] || {
+            echo 'error: Native builds require an unprivileged user' >&2
+            exit 2
+        }
+        CONFIG_FILE="$MOOS_ROOT/configs/moos_native_x86_64_defconfig"
+        OUTPUT_DIR="$MOOS_ROOT/output/native"
+        # Fixed N1 baseline epoch; callers may select another recorded build epoch.
+        SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1790812800}
+        E2FSPROGS_FAKE_TIME=$SOURCE_DATE_EPOCH
+        TZ=UTC
+        export SOURCE_DATE_EPOCH E2FSPROGS_FAKE_TIME TZ
+        ;;
+    *) echo 'error: --target must be personal or native' >&2; exit 2 ;;
 esac
 case "$JOBS" in
     ''|*[!0-9]*) echo 'error: jobs must be a positive integer' >&2; exit 2 ;;
