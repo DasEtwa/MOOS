@@ -36,7 +36,7 @@ esac
 
 
 class DisposableDisk:
-    def __init__(self, source, debugfs):
+    def __init__(self, source, debugfs, *, installed=False):
         native_disk.regular_file(source)
         self.temporary = tempfile.TemporaryDirectory(prefix='moos-native-persistence-', dir='/tmp')
         self.workspace = Path(self.temporary.name)
@@ -44,7 +44,7 @@ class DisposableDisk:
         shutil.copyfile(source, self.image)
         self.image.chmod(0o600)
         (self.workspace / '.disposable-native-copy').write_text('disposable-native-copy-v1\n')
-        self.partitions = {p.name: p for p in native_disk.read_gpt(self.image)}
+        self.partitions = {p.name: p for p in native_disk.read_gpt(self.image, installed=installed)}
         self.debugfs = debugfs
 
     def __enter__(self):

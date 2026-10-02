@@ -23,7 +23,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y shellcheck
-          find scripts system/overlay system/native/overlay -type f -exec sh -c '
+          find scripts system/overlay system/native/overlay system/native-installer/overlay -type f -exec sh -c '
             for file do
               if head -n 1 "$file" | grep -q "^#!/bin/sh"; then
                 sh -n "$file" && shellcheck --severity=warning --exclude=SC1007 "$file" || exit
@@ -42,6 +42,7 @@ jobs:
           python3 tests/release_profile.py
           python3 tests/native_config.py
           python3 tests/native_layout.py
+          python3 tests/native_installer_policy.py
           python3 tests/docs_links.py
           python3 tests/qemu_launcher.py
           python3 tests/personal_identity.py
