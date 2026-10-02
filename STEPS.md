@@ -37,7 +37,8 @@ signed Native provenance, packages/Store/security update service and A/B remain
 NOT VERIFIED/deferred in N2. N3 adds its separate restricted installer below;
 N2's dated acceptance is not rewritten by that later work.
 
-Native N3 status: tested on `codex/moos-native-n3-installer`, stacked on open
+Native N3 status: open [PR #45](https://github.com/DasEtwa/MOOS/pull/45),
+tested on `codex/moos-native-n3-installer`, stacked on open
 PR #44 head `0816d1837bcecfd7592d450fabc5b9ff4d7e5d33`; not merged
 production truth. See [installer contract](docs/native/installer.md) and
 [N3 acceptance](docs/native/acceptance/N3.md). Complete Windows/WSL2 Core and
@@ -53,6 +54,7 @@ firmware and unrelated disk stay unchanged; corrupt payload/state/layout and
 stale layout plans fail closed. Interruption never reports COMPLETE.
 Personal/Host/Protocol/Gateway/source-iOS regressions and Rust checks pass.
 Final independent source/evidence review passed without remaining blockers.
+Gateway and Host/guest policy CI passed for the reviewed implementation head.
 Physical installation, live hotplug, power-loss recovery, signed Native
 provenance, Secure Boot, ISO, packages/Store, A/B and security update service
 remain NOT VERIFIED/deferred. Next scope: N4 typed local/app-assisted setup
