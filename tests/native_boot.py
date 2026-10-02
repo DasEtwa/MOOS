@@ -7,13 +7,13 @@ import hashlib
 import importlib.util
 import os
 import re
-import struct
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 import qemu_smoke
+import native_disk
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("release_validator", ROOT / "scripts/validate-release-rootfs.py")
@@ -28,35 +28,25 @@ def digest(path):
 
 def inspect_disk(image, debugfs):
     """Inspect SYSTEM_A from the disk being booted, not an adjacent rootfs."""
-    with image.open("rb") as stream:
-        mbr = stream.read(512)
-        if len(mbr) != 512 or mbr[510:] != b"\x55\xaa":
-            raise ValueError("Native disk has no valid MBR boot signature")
-        if struct.unpack_from("<I", mbr, 440)[0] != 0x4D4F4F53:
-            raise ValueError("unexpected Native prototype disk identity")
-        boot_type = mbr[446 + 4]
-        system_type = mbr[462 + 4]
-        start, sectors = struct.unpack_from("<II", mbr, 462 + 8)
-        if boot_type != 0xEF or system_type != 0x83 or not sectors:
-            raise ValueError("Native disk is missing BOOT/SYSTEM_A")
-        if (start + sectors) * 512 > image.stat().st_size:
-            raise ValueError("truncated Native SYSTEM_A partition")
-        stream.seek(start * 512)
-        with tempfile.TemporaryDirectory(prefix="moos-native-check-") as temporary:
-            system = Path(temporary) / "system.ext4"
-            with system.open("wb") as destination:
-                remaining = sectors * 512
-                while remaining:
-                    chunk = stream.read(min(remaining, 1024 * 1024))
-                    if not chunk:
-                        raise ValueError("truncated Native disk")
-                    destination.write(chunk)
-                    remaining -= len(chunk)
-            validator.validate_shadow(validator.read_image_shadow(debugfs, system))
-            result = subprocess.run([str(debugfs), "-R", "cat /etc/moos-platform", str(system)],
-                                    capture_output=True, check=True, timeout=10)
-            if result.stdout != b"MOOS_BACKEND='native'\nMOOS_ARCHITECTURE='x86_64'\n":
-                raise ValueError("disk does not contain the Native platform identity")
+    partitions = native_disk.read_gpt(image)
+    with tempfile.TemporaryDirectory(prefix="moos-native-check-") as temporary:
+        system = Path(temporary) / "system.ext4"
+        native_disk.extract_partition(image, partitions[2], system)
+        validator.validate_shadow(validator.read_image_shadow(debugfs, system))
+        if native_disk.fs_read(debugfs, system, '/etc/moos-platform') != b"MOOS_BACKEND='native'\nMOOS_ARCHITECTURE='x86_64'\n":
+            raise ValueError("disk does not contain the Native platform identity")
+        data = Path(temporary) / "data.ext4"
+        native_disk.extract_partition(image, partitions[4], data)
+        if native_disk.fs_read(debugfs, data, '/state-version') != b'1\n':
+            raise ValueError('Native distribution DATA schema is invalid')
+        if native_disk.fs_read(debugfs, data, '/identity/installation-id', missing_ok=True) is not None:
+            raise ValueError('Native distribution image contains an installation identity')
+    with image.open('rb') as stream:
+        stream.seek(partitions[3].offset)
+        for _ in range(partitions[3].size // native_disk.MIB):
+            if any(stream.read(native_disk.MIB)):
+                raise ValueError('SYSTEM_B is not the reserved empty slot')
+    return partitions
 
 
 class NativeSession(qemu_smoke.QemuSession):
@@ -112,6 +102,7 @@ def main():
             (r"VFS: Mounted root .* filesystem", "mounted system filesystem"),
             (re.escape("MOOS Native " + version), "MOOS version"),
             (r"Backend: native / Architecture: x86_64 / Release root: locked", "Native release identity"),
+            (r"MOOS Native state: DATA READY at /var/lib/moos; schema 1; identity READY; SYSTEM_B RESERVED", "persistent state initialization"),
         ]:
             qemu_smoke.require(pattern, boot, description)
         if args.network == "user":
