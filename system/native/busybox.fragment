@@ -1,0 +1,5 @@
+# Bounded entropy wait, persistent file metadata checks and filesystem probes.
+CONFIG_TIMEOUT=y
+CONFIG_STAT=y
+CONFIG_FEATURE_STAT_FORMAT=y
+CONFIG_FEATURE_BLKID_TYPE=y

@@ -7,18 +7,35 @@ the mobile MVP is built around one Personal MOOS system.
 
 ## Verified foundation
 
-The separate Native sequence is defined in [NATIVE.md](NATIVE.md): N0, N1,
+The separate Native sequence is defined in [Native architecture](docs/native/README.md): N0, N1,
 N2, N3, N4, P1, P2, U1, U2, H1, H2, W1, M1. This does not reorder or redefine
 the historical Personal/mobile slices below. N0 defines the backend-neutral
 contract; N1 adds only the release disk/bootloader foundation. N2 persistence
-and recovery must precede a Native installer. Native acceptance evidence is
-recorded separately in [NATIVE_ACCEPTANCE.md](NATIVE_ACCEPTANCE.md).
+and recovery semantics must precede a Native installer. Native evidence is
+recorded separately in [N1 acceptance](docs/native/acceptance/N1.md) and
+[N2 acceptance](docs/native/acceptance/N2.md).
 
 Native N0/N1 status: complete on the Native work branch. Observed acceptance:
 full Windows/WSL2 build, QEMU BIOS and UEFI disk boot, serial identity/version,
 DHCP, locked release-root rejection, clean emulator termination, non-bootable
 disk rejection and identical repeated image generation. Physical hardware,
-installer, persistence/recovery, packages and A/B remain NOT VERIFIED/deferred.
+installer, packages, full recovery and A/B remain NOT VERIFIED/deferred.
+
+Native N2 status: tested on `codex/moos-native-n2`, stacked on open PR #43
+head `a47ef206877c0420824f9505e80aa2db08550131`; not merged production truth.
+Observed: complete unprivileged Windows/WSL2 Buildroot build, repeated byte-equal
+generation, GPT BIOS/UEFI disk boot, serial/DHCP and locked-root rejection.
+DATA mounts at `/var/lib/moos`; random local installation identity and marker
+survive reboot and SYSTEM_A refresh in both boot modes. Fresh copies receive
+different identities. Ten real DATA failure cases block state readonly without
+formatting/replacing identity, including malformed encoding and post-rw failure.
+SYSTEM_B is empty/reserved, not A/B functionality. Independent source review has
+no remaining blocking findings; Personal/terminal/Host/Protocol regressions pass.
+N2 establishes a tested system/DATA contract, not production installation readiness.
+Physical hardware, installer, installed multi-disk identities, full recovery,
+signed Native provenance, packages/Store/security update service and A/B remain
+NOT VERIFIED/deferred. The next Native scope is N3 design/media and safe local
+plan validation before destructive installation; no real disk writes occur here.
 
 Complete before this roadmap: Buildroot x86_64 Linux 6.18.43 LTS, BusyBox 1.38.0,
 QEMU boot/login/networking, MOOS utilities, reboot/poweroff smoke tests,

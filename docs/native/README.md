@@ -5,7 +5,7 @@ deployment backend for a headless server/appliance OS. Its intended uses are
 dedicated servers, homelabs, appliances, controlled service hosts and development
 systems. It is not recommended as a primary desktop operating system.
 
-## N0/N1 architecture contract
+## N0/N2 architecture contract
 
 MOOS Core may use Native (bare metal), WSL (Windows), VM (macOS or generic
 virtualization), or future backends. Backend names describe deployment, not
@@ -15,7 +15,8 @@ ABI must remain backend-neutral. EFI/BIOS, drivers, devices, partition tables,
 boot slots and system disk layout belong to Native. Windows WSL lifecycle,
 Apple virtualization APIs and QEMU paths likewise belong to their backends.
 
-This slice adds a separate Buildroot target and a development disk-boot runner.
+N1 added a separate Buildroot target and a development disk-boot runner;
+N2 extends that target with explicit system/DATA ownership.
 It does not turn Native into the existing managed Personal Host, install
 `moosd`/Gateway, add a remote operation, or change Protocol v1. The internal
 `/etc/moos-platform` file records `native` and `x86_64`; `/etc/issue` exposes
@@ -26,7 +27,7 @@ build/test tool and is not a Native runtime dependency.
 
 ## Build and disk acceptance
 
-Use the Linux build prerequisites in README. Windows development uses WSL2
+Use the Linux build prerequisites in [README](../../README.md). Windows development uses WSL2
 and a Linux checkout with LF shell scripts, a PATH containing the Linux build
 tools, and an unprivileged builder. Buildroot, the existing pinned Linux sources,
 and the existing dependency hash checks remain authoritative.
@@ -34,8 +35,12 @@ and the existing dependency hash checks remain authoritative.
 ```sh
 ./scripts/build.sh --target native --jobs 4
 python3 tests/native_config.py
+python3 tests/native_layout.py
+python3 tests/native_grub.py
 python3 tests/native_boot.py --boot bios --network user
 python3 tests/native_boot_negative.py
+python3 tests/native_persistence.py
+python3 tests/native_state_negative.py
 python3 tests/native_boot.py --boot uefi --network user \
   --uefi-code /usr/share/OVMF/OVMF_CODE_4M.fd \
   --uefi-vars /usr/share/OVMF/OVMF_VARS_4M.fd
@@ -65,21 +70,32 @@ There is deliberately no convenient release root shell or provisioned credential
 
 The test inspects the actual disk's SYSTEM_A shadow and backend identity,
 requires the GRUB marker, kernel, mounted root, MOOS version and login prompt,
-checks DHCP when requested, rejects blank root login, terminates QEMU cleanly,
+checks DATA readiness, DHCP when requested, rejects blank root login, terminates QEMU cleanly,
 and checks that disk and firmware backing files are unchanged. A direct
 `-kernel` boot is not Native acceptance. Physical devices and firmware require
 separate hardware evidence; QEMU acceptance does not establish hardware support.
 
-## Initial disk layout and reproducibility
+## N2 GPT disk layout and reproducibility
 
-The initial image follows Buildroot's small GRUB2 BIOS/EFI disk pattern:
+N2 replaces the N1 MBR prototype with a 171 MiB GPT distribution image.
+Primary and backup GPT headers/entry arrays and a protective MBR are present.
+The pinned host `grub-bios-setup` embeds GRUB into BIOS_GRUB using its normal
+GPT algorithm on a regular file. A narrow tracked GRUB host-tool patch selects
+the mapped whole regular image instead of guessing the build host's root
+device; embedding checks and blocklist refusal remain intact. No loop device, mounted Host filesystem or
+privileged checkout execution is needed. The layout is Native implementation
+detail, never a generic Protocol or package concept.
 
-| Region | Initial role |
-| --- | --- |
-| MBR sector | BIOS GRUB boot code and partition table |
-| Sector 1 to 1 MiB | Bounded GRUB BIOS embedding region |
-| BOOT, partition 1 | 16 MiB FAT, EFI fallback executable, GRUB config, kernel |
-| SYSTEM_A, partition 2 | 60 MiB ext4 MOOS release system |
+| GPT role | Offset / size | Ownership and purpose |
+| --- | --- | --- |
+| BIOS_GRUB, partition 1 | 1 MiB / 1 MiB | GRUB BIOS embedding, no filesystem |
+| BOOT, partition 2 | 2 MiB / 16 MiB | EFI System Partition/FAT, loaders, config and kernel |
+| SYSTEM_A, partition 3 | 18 MiB / 60 MiB | Active ext4 release system; still writable |
+| SYSTEM_B, partition 4 | 78 MiB / 60 MiB | Zero-filled, unformatted reserved system slot; no-automount flag |
+| DATA, partition 5 | 138 MiB / 32 MiB | Persistent ext4 state, mounted at `/var/lib/moos` |
+
+SYSTEM_B contains no system, active/verified marker, health status or boot entry.
+There is no slot switch, try boot, confirmation, fallback or A/B updater.
 
 GRUB supports legacy BIOS and x86_64 UEFI fallback boot. Secure Boot is not
 implemented.
@@ -91,13 +107,14 @@ The source enables serial console, virtio, AHCI, NVMe and a small
 selection of Ethernet drivers; inclusion alone is not hardware acceptance.
 The kernel finds SYSTEM_A by PARTUUID instead of a hardcoded device name.
 
-The MBR signature, FAT ID, filesystem UUID and hash seed are fixed prototype
-values. They make image generation deterministic, but cloned images do not
-have independent installed identities. **Do not treat this as an installer or
-a supported multi-disk deployment layout.** MBR has four primary entries and
-the conventional 2 TiB limit. N2 must decide GPT migration, per-install stable
-identities and recovery semantics before persistent installations; no stable
-core API exposes this prototype partition representation.
+GPT disk/partition GUIDs, FAT ID and filesystem UUID/hash seeds are fixed
+distribution-image values. The local runtime installation UUID is separate and
+never baked into the image. It is an identifier, not an authentication secret,
+pairing key or authorization grant. N3 must define per-install disk/partition identities
+and unique boot selection before installation on machines with multiple disks.
+Attaching identical system-image clones simultaneously is not supported:
+the kernel PARTUUID selection may be ambiguous. DATA selection stays on the
+actual SYSTEM_A disk and never falls back to another disk with the same label.
 
 `BR2_REPRODUCIBLE`, a recorded `SOURCE_DATE_EPOCH` (default 1790812800), UTC,
 fixed filesystem metadata and normalized BOOT timestamps control image
@@ -110,11 +127,117 @@ The FAT controls follow the pinned tools' behavior: dosfstools
 and mtools' deterministic timestamp handling; Buildroot's `board/pc` recipes
 provide the underlying GRUB/genimage pattern.
 
-SYSTEM_A contains today's writable minimal rootfs; it is not yet an enforced
-immutable system. There is no DATA partition, B slot, slot selection, installed
-user state, recovery promise, installer, or production image provenance path.
-Future persistent state must live separately from replaceable system contents.
-Do not store valuable data in this experimental system partition.
+SYSTEM_A is not an enforced immutable system. DATA persistence is an N2
+foundation, not an installation, backup or full recovery guarantee. There is
+no production image provenance path or installer. Use disposable images only;
+valuable state still needs independently verified backups/recovery.
+
+## Persistent-state ownership and initialization
+
+SYSTEM_A/B are replaceable. `/etc` remains system defaults; durable operator
+configuration belongs to DATA/config, not modified system defaults. `/run`,
+`/tmp` and seedrng's `/run/seedrng` are transient. A seed from a cloned system
+slot is not credited as entropy. This slice adds no credential/pairing service.
+
+| Path under `/var/lib/moos` | N2 contract |
+| --- | --- |
+| `state-version` | Prepared `1\n`, root:root, mode 0600, regular single-link file |
+| `identity/` | Created on first initialization, root:root 0700 |
+| `identity/installation-id` | Local random UUIDv4, root:root 0600, single-link; generated once |
+| `config/` | Created bounded persistent configuration boundary, root:root 0700 |
+| `packages/`, `apps/`, `instances/`, `updates/`, `recovery/` | Future-reserved ownership boundaries; not created or implemented in N2 |
+
+DATA root is root:root 0700, mounted nodev/nosuid/noexec before future stateful
+components may start. `S20moos-state` finds exactly one DATA partition by its
+GPT role name on the actual root disk, then checks filesystem label, UUID and
+ext4 type. It first mounts readonly with `noload`, validates schema, directory
+ownership and an existing identity, and only then permits writes. This is
+metadata safety, not authenticated filesystem provenance. No runtime formatter,
+fsck repair, schema migration or downgrade is called.
+
+New identities wait at most 20 seconds on Linux `/dev/random` for CRNG readiness
+before using `/proc/sys/kernel/random/uuid`. Entropy failure blocks state instead
+of using MAC, serial, CPU, hostname or cloud identity. Existing valid identity is
+reused without new randomness. Staging plus no-clobber hardlink publication and
+sync prevent replacing an existing identity. Interrupted initialization can leave
+an empty identity directory, staged file or link count of two: these are explicit
+BLOCKED/recovery cases, not automatic regeneration. Offline copying already
+initialized DATA copies its identity; N2 does not detect or reset such clones.
+
+The transient `/run/moos-native-state` records READY or BLOCKED for this state
+boundary. Future stateful components MUST require READY; no such service is
+introduced here. Missing, corrupt, mismatched, ambiguous or incompatible DATA
+keeps core diagnostics/login bootable and emits `DATA NOT AVAILABLE; stateful
+services BLOCKED`. DATA stays readonly, or a readonly tiny tmpfs blocks writable
+system fallback. A failure after rw initialization revokes writes; if the kernel
+cannot enforce that blocker it is reported explicitly and services must stay
+blocked. Newer/unknown schema or invalid existing identity is never repaired,
+replaced, migrated or downgraded silently.
+
+Normal Native acceptance keeps readonly backing plus snapshots. Persistence
+acceptance first creates a private single-link 0600 regular copy under a 0700
+`/tmp/moos-native-persistence-*` directory. The runner's explicit test-only
+`--test-writable-copy` cannot take `--image`, a symlink, hardlink, canonical
+output or block device. Firmware still uses readonly backing and snapshots.
+Tests inject fixed telemetry/poweroff into disposable SYSTEM_A offline and
+write a bounded DATA marker offline; no release shell or exec API is introduced.
+The distribution has no test hook. Replacement tests refresh only SYSTEM_A and
+prove DATA identity/marker remain after booting again.
+
+## N2 recovery contract (full recovery is deferred)
+
+A damaged system slot does not authorize formatting DATA. A future recovery
+environment may repair/replace A/B independently while preserving DATA and the
+installation identity. Identity reset belongs only to an explicit new-install
+operation. Unknown state schema fails safely. Recovering incomplete identity
+initialization, dirty/damaged filesystems and hardware loss needs an explicit
+future recovery design; normal boot does not format or repair them. A successful
+kernel boot cannot mark a future update healthy or successful. U1/U2 remain
+unimplemented, with no fake health or rollback state.
+
+## Core, Apps & Features, and update planes (design direction only)
+
+The base Native image should contain only the minimal MOOS Core needed to boot,
+network, maintain local identity/state and eventually verify, update, recover
+and manage itself. Package, verification, updater and recovery foundations are
+future Core responsibilities; N2 does not implement them merely by naming them.
+
+Optional Apps & Features must not silently enter the base OS. Recommended
+foundation capabilities may include Tailscale, MOOS Sandboxes and MOOS Store;
+apps may include MOOS Servers and workloads; features add optional Host
+capabilities; runtimes such as Java are installed only when needed. None is
+installed or implemented by N2.
+
+MOOS Store / `ms` is future product/catalog UX, not the package engine:
+
+```text
+MOOS Store -> package/catalog API -> moos pkg -> verifier -> transactional store
+```
+
+MOOS remains usable without Store. Persistent package/application state belongs
+to DATA, independently of replaceable system slots and optional catalog UX.
+
+| Future lifecycle plane | Examples |
+| --- | --- |
+| System / security | Kernel, boot/recovery, update/trust engines, critical local control; installed sandbox isolation policy/runtime and security-critical auth/network components |
+| Product | MOOS Servers, Sandbox management UX, Store and additional MOOS capabilities |
+| Apps / user workloads | Minecraft, databases, web services, third-party apps and optional runtimes |
+
+Security-sensitive components remain in the security lifecycle even when an
+optional product installs them. Future implementation MUST NOT depend solely on
+users manually checking for known critical vulnerabilities. It must support
+authenticated signed security metadata and proactive remediation, including
+component/version/minimum-safe-version/severity/required-action information.
+Transport is reachability, not trust; metadata and artifacts must follow MOOS
+trust rules. An unpatchable vulnerable capability must fail closed as
+`BLOCKED — SECURITY`, without unnecessarily disabling unrelated capabilities:
+
+```text
+MOOS Core READY / Network READY / MOOS Sandboxes BLOCKED — SECURITY / MOOS Servers READY
+```
+
+This is a future design requirement, not an implemented channel, automatic
+updater, Store, package engine or security certification.
 
 ## Ordered next slices
 
@@ -134,7 +257,8 @@ Do not store valuable data in this experimental system partition.
 | W1 | Complete WSL runtime backend acceptance; building under WSL does not establish this |
 | M1 | macOS virtualization backend (distinct from the historical Personal M1 slice) |
 
-Only N0/N1 are implemented here. STEPS records observed acceptance; later rows
+N0/N1 and the N2 disk/state foundation are implemented on this work branch.
+[STEPS](../../STEPS.md) and [N2 acceptance](acceptance/N2.md) distinguish observed results from pending gates; later rows
 are design direction, not permission to skip their prerequisites.
 
 ## Persistent systems and A/B direction
@@ -142,7 +266,8 @@ are design direction, not permission to skip their prerequisites.
 Future Native layouts should separate BOOT, SYSTEM_A, SYSTEM_B and DATA.
 DATA must preserve user data, package state, configuration, credentials,
 pairing, instance data and rollback state through updates. N2 defines mounts,
-ownership, migrations and recovery before installation. U1 writes a complete
+ownership and safe schema rejection; migrations and full recovery remain future
+work before installation. U1 writes a complete
 update to the inactive slot, verifies it, tries boot, confirms health and only
 then marks it good; an unconfirmed failed system must return to the prior slot.
 There is no fake A/B state in this image.
@@ -167,8 +292,9 @@ not merged production authority at the inspected baseline; no Native component
 depends on it. Re-evaluate the current verifier and findings before P1/U1.
 Production private signing keys never enter checkout, CI, build trees, normal
 Hosts or MOOS-controlled temporary paths. Public trust provisioning and verified
-release provenance remain separate from reproducible bytes (ADMIN_RELEASES and
-HOST_ONBOARDING still apply).
+release provenance remain separate from reproducible bytes
+([Admin releases](../../ADMIN_RELEASES.md) and
+[Host onboarding](../../HOST_ONBOARDING.md) still apply).
 
 ## Installer direction (unimplemented)
 
@@ -199,4 +325,4 @@ the target exists, its identity still matches the approved plan, it did not
 change, it is not installation media where distinguishable, and the plan is
 internally consistent. A `/dev/sda` string is insufficient identity. Consider a
 short local cancellation window before destructive writes. No such writes or
-permissions are introduced by N1.
+installation permissions are introduced by N1/N2.

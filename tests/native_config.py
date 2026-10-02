@@ -2,18 +2,38 @@
 """Native profile and executable launcher boundary regressions (no VM needed)."""
 import os
 from pathlib import Path
-import struct
 import subprocess
 import tempfile
 import unittest
 
 import native_boot
+import native_disk
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "scripts/run-native-qemu.sh"
 
 
 class NativePolicy(unittest.TestCase):
+    def test_generated_output_links_rejected_before_writes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            victim = workspace / 'unrelated-file'
+            victim.write_bytes(b'preserve this file')
+            environment = dict(os.environ, BINARIES_DIR=str(workspace), BUILD_DIR='not-used')
+            for name in ['native-data.ext4', 'native-device.map', 'moos-native-x86_64.img']:
+                output = workspace / name
+                for link_type in ['symlink', 'hardlink']:
+                    if link_type == 'symlink':
+                        output.symlink_to(victim)
+                    else:
+                        output.hardlink_to(victim)
+                    result = subprocess.run(['sh', str(ROOT / 'scripts/native-post-image.sh')],
+                                            env=environment, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn('unsafe generated Native output', result.stderr)
+                    self.assertEqual(victim.read_bytes(), b'preserve this file')
+                    output.unlink()
+
     def test_release_only_build(self):
         result = subprocess.run(["sh", str(ROOT / "scripts/build.sh"), "--target", "native", "--profile", "development"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
@@ -69,6 +89,26 @@ class NativePolicy(unittest.TestCase):
             self.assertNotIn("hostfwd", arguments)
             for options in [["--direct"], ["-kernel", "bad"], ["--network", "bridge"], ["--boot", "uefi"], ["--boot", "invalid"]]:
                 self.assertEqual(subprocess.run(base + options, env=environment, capture_output=True).returncode, 2)
+            self.assertEqual(subprocess.run(base + ['--test-writable-copy', str(ROOT)], env=environment, capture_output=True).returncode, 2)
+            with tempfile.TemporaryDirectory(prefix='moos-native-persistence-', dir='/tmp') as disposable:
+                workspace = Path(disposable)
+                copy = workspace / 'disk.img'
+                copy.write_bytes(b'disposable')
+                copy.chmod(0o600)
+                (workspace / '.disposable-native-copy').write_text('disposable-native-copy-v1\n')
+                writable = ['sh', str(RUNNER), '--qemu', str(qemu), '--test-writable-copy', disposable]
+                subprocess.run(writable, env=environment, check=True)
+                arguments = capture.read_text().splitlines()
+                self.assertEqual(arguments.count('--bind'), 1)
+                self.assertEqual(arguments[arguments.index('--bind') + 1:arguments.index('--bind') + 3], [str(copy), '/moos/native.img'])
+                self.assertIn('file=/moos/native.img,if=virtio,snapshot=off,format=raw', arguments)
+                link = workspace / 'second.img'
+                link.hardlink_to(copy)
+                self.assertEqual(subprocess.run(writable, env=environment, capture_output=True).returncode, 2)
+                link.unlink()
+                copy.unlink()
+                copy.symlink_to(image)
+                self.assertEqual(subprocess.run(writable, env=environment, capture_output=True).returncode, 2)
             fake_id = root / "bin/id"
             fake_id.write_text("#!/bin/sh\nprintf '0\\n'\n")
             fake_id.chmod(0o755)
@@ -80,16 +120,11 @@ class NativePolicy(unittest.TestCase):
     def test_non_bootable_and_truncated_disks_fail(self):
         with tempfile.TemporaryDirectory() as temporary:
             image = Path(temporary) / "bad.img"
-            image.write_bytes(bytes(512))
+            with image.open('wb') as stream:
+                stream.truncate(native_disk.DISK_SIZE)
             with self.assertRaisesRegex(ValueError, "boot signature"):
                 native_boot.inspect_disk(image, Path("missing-debugfs"))
-            mbr = bytearray(512)
-            mbr[510:] = b"\x55\xaa"
-            struct.pack_into("<I", mbr, 440, 0x4D4F4F53)
-            mbr[450] = 0xEF
-            mbr[466] = 0x83
-            struct.pack_into("<II", mbr, 470, 34816, 122880)
-            image.write_bytes(mbr)
+            image.write_bytes(bytes(512))
             with self.assertRaisesRegex(ValueError, "truncated"):
                 native_boot.inspect_disk(image, Path("missing-debugfs"))
 

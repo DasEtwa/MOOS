@@ -8,6 +8,7 @@ import sys
 import tempfile
 
 import native_boot
+from native_test_disk import DisposableDisk
 
 
 def main():
@@ -38,6 +39,28 @@ def main():
             if native_boot.digest(image) != before:
                 raise AssertionError("negative boot changed its backing image")
         print("MOOS Native non-bootable disk rejection: PASS (real QEMU boot deadline)")
+        # A valid GRUB disk must not fall back to reserved SYSTEM_B when the
+        # active PARTUUID is absent. Mutation remains a private regular copy.
+        with DisposableDisk(args.image, args.debugfs) as disk:
+            disk.mutate_entries(lambda entries: entries.__setitem__(slice(2 * 128 + 16, 2 * 128 + 32), bytes.fromhex('01010101010101010101010101010101')))
+            before = native_boot.digest(disk.image)
+            options = ['--image', str(disk.image), '--boot', 'bios']
+            if args.qemu:
+                options += ['--qemu', str(args.qemu)]
+            session = native_boot.NativeSession(options)
+            try:
+                try:
+                    session.read_until(r'moos-native login:\s*', 15)
+                except TimeoutError:
+                    if 'MOOS Native disk boot (GRUB)' not in session.output:
+                        raise AssertionError('missing SYSTEM_A test did not reach bootloader')
+                else:
+                    raise AssertionError('missing SYSTEM_A unexpectedly reached login')
+            finally:
+                session.close()
+            if native_boot.digest(disk.image) != before:
+                raise AssertionError('missing SYSTEM_A test modified backing disk')
+        print('MOOS Native missing SYSTEM_A: PASS (actual disk boot fails; no reserved-slot fallback)')
         return 0
     except (OSError, ValueError, AssertionError, subprocess.SubprocessError) as error:
         print("MOOS Native negative boot: FAIL: " + str(error), file=sys.stderr)

@@ -10,24 +10,48 @@ NETWORK=none
 CODE=''
 VARS=''
 DRY_RUN=0
+TEST_WORKSPACE=''
+IMAGE_EXPLICIT=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --image|--qemu|--boot|--network|--uefi-code|--uefi-vars)
+        --image|--qemu|--boot|--network|--uefi-code|--uefi-vars|--test-writable-copy)
             [ "$#" -ge 2 ] || { echo "error: $1 requires a value" >&2; exit 2; }
             case "$1" in
-                --image) IMAGE=$2 ;; --qemu) QEMU=$2 ;; --boot) BOOT=$2 ;;
+                --image) IMAGE=$2; IMAGE_EXPLICIT=1 ;; --qemu) QEMU=$2 ;; --boot) BOOT=$2 ;;
                 --network) NETWORK=$2 ;; --uefi-code) CODE=$2 ;; --uefi-vars) VARS=$2 ;;
+                --test-writable-copy) TEST_WORKSPACE=$2 ;;
             esac
             shift 2 ;;
         --dry-run) DRY_RUN=1; shift ;;
         -h|--help)
             echo 'Usage: scripts/run-native-qemu.sh [--image FILE] [--qemu FILE] [--boot bios|uefi] [--uefi-code FILE --uefi-vars FILE] [--network none|user] [--dry-run]'
+            echo 'Test-only: --test-writable-copy PRIVATE_WORKSPACE (disposable copies under /tmp only)'
             exit 0 ;;
         *) echo "error: unknown option: $1" >&2; exit 2 ;;
     esac
 done
 case "$BOOT" in bios|uefi) ;; *) echo 'error: boot must be bios or uefi' >&2; exit 2 ;; esac
 case "$NETWORK" in none|user) ;; *) echo 'error: network must be none or user' >&2; exit 2 ;; esac
+if [ -n "$TEST_WORKSPACE" ]; then
+    [ "$IMAGE_EXPLICIT" -eq 0 ] || { echo 'error: writable tests cannot select --image' >&2; exit 2; }
+    # This opt-in can bind only a single-link disposable regular copy inside
+    # a private test-owned /tmp directory. Never a canonical image or device.
+    case "$TEST_WORKSPACE" in /tmp/moos-native-persistence-*) ;; *) echo 'error: invalid persistence test workspace' >&2; exit 2 ;; esac
+    [ "$(dirname "$TEST_WORKSPACE")" = /tmp ] && [ ! -L "$TEST_WORKSPACE" ] &&
+        [ "$(readlink -f "$TEST_WORKSPACE")" = "$TEST_WORKSPACE" ] &&
+        [ "$(stat -c '%u:%a' "$TEST_WORKSPACE")" = "$(id -u):700" ] || {
+            echo 'error: persistence workspace must be private and owned by the test user' >&2; exit 2;
+        }
+    IMAGE="$TEST_WORKSPACE/disk.img"
+    [ -f "$IMAGE" ] && [ ! -L "$IMAGE" ] &&
+        [ "$(stat -c '%u:%h:%a' "$IMAGE")" = "$(id -u):1:600" ] || {
+            echo 'error: writable disk must be a private single-link regular test copy' >&2; exit 2;
+        }
+    [ -f "$TEST_WORKSPACE/.disposable-native-copy" ] && [ ! -L "$TEST_WORKSPACE/.disposable-native-copy" ] &&
+        [ "$(cat "$TEST_WORKSPACE/.disposable-native-copy")" = 'disposable-native-copy-v1' ] || {
+            echo 'error: missing persistence test marker' >&2; exit 2;
+        }
+fi
 [ -f "$IMAGE" ] && [ ! -b "$IMAGE" ] || { echo 'error: Native image must be a regular file' >&2; exit 1; }
 case "$IMAGE$CODE$VARS" in *,*) echo 'error: QEMU file paths must not contain commas' >&2; exit 2 ;; esac
 if [ ! -x "$QEMU" ]; then
@@ -46,7 +70,11 @@ fi
 if [ "$DRY_RUN" -eq 1 ]; then
     printf 'boot: %s (disk/GRUB; no direct kernel)\nnetwork: %s\n' "$BOOT" "$NETWORK"
     echo 'isolation: rootless bubblewrap; TCG; 256M; one CPU'
-    echo 'disk and firmware: read-only backing files with temporary snapshots'
+    if [ -n "$TEST_WORKSPACE" ]; then
+        echo 'disk: writable disposable test copy only; firmware: readonly temporary snapshots'
+    else
+        echo 'disk and firmware: read-only backing files with temporary snapshots'
+    fi
     echo 'shared folders/devices/host forwards: none; serial console only'
     exit 0
 fi
@@ -62,7 +90,14 @@ set -- "$@" --dev /dev --proc /proc --size 134217728 --tmpfs /tmp --chmod 1777 /
     --ro-bind "$QEMU" /opt/moos-qemu/bin/qemu \
     --ro-bind "$LIB" /opt/moos-qemu/lib --ro-bind "$SHARE" /opt/moos-qemu/share/qemu \
     --ro-bind /lib /lib --ro-bind /lib64 /lib64 --ro-bind /usr/lib /usr/lib \
-    --ro-bind-try /usr/lib64 /usr/lib64 --ro-bind "$IMAGE" /moos/native.img
+    --ro-bind-try /usr/lib64 /usr/lib64
+DISK_DRIVE='file=/moos/native.img,if=virtio,snapshot=on,format=raw'
+if [ -n "$TEST_WORKSPACE" ]; then
+    set -- "$@" --bind "$IMAGE" /moos/native.img
+    DISK_DRIVE='file=/moos/native.img,if=virtio,snapshot=off,format=raw'
+else
+    set -- "$@" --ro-bind "$IMAGE" /moos/native.img
+fi
 if [ "$NETWORK" = user ]; then set -- "$@" --ro-bind-try /etc/resolv.conf /etc/resolv.conf; fi
 if [ "$BOOT" = uefi ]; then
     set -- "$@" --ro-bind "$CODE" /moos/code.fd --ro-bind "$VARS" /moos/vars.fd
@@ -70,7 +105,7 @@ fi
 set -- "$@" --setenv PATH /usr/bin:/bin --setenv HOME /nonexistent --setenv TMPDIR /tmp \
     --setenv LC_ALL C --setenv QEMU_AUDIO_DRV none /opt/moos-qemu/bin/qemu \
     -M pc -accel tcg -m 256M -smp 1 -nodefaults -no-reboot \
-    -drive file=/moos/native.img,if=virtio,snapshot=on,format=raw \
+    -drive "$DISK_DRIVE" \
     -nographic -chardev stdio,id=native-console,mux=on,signal=off \
     -serial chardev:native-console -monitor none -L /opt/moos-qemu/share/qemu
 if [ "$BOOT" = uefi ]; then

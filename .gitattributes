@@ -1,1 +1,2 @@
 patches/buildroot/*.patch -whitespace
+patches/grub2/*.patch -whitespace
