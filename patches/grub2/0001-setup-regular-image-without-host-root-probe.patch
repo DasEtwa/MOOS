@@ -1,0 +1,43 @@
+From: MOOS maintainers <moos@example.invalid>
+Subject: [PATCH] setup: select the mapped image for whole regular-file disks
+
+For an image build, the directory containing core.img belongs to the build
+host, not to the target disk. Do not guess/probe that host's root device when
+the destination is a whole, regular-file disk in the explicit device map.
+Use the same mapped image as the root device instead. Keep GRUB's GPT embedding
+algorithm, filesystem safety checks and refusal of blocklist installs intact.
+Block-device and partition installation behavior remains unchanged.
+
+This is a MOOS-local build-tool patch for GRUB 2.12, not a runtime change.
+Upstream-Status: Inappropriate [MOOS regular-file image build integration]
+---
+ util/setup.c | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/util/setup.c b/util/setup.c
+--- a/util/setup.c
++++ b/util/setup.c
+@@ -313,6 +313,23 @@ SETUP (const char *dir,
+ 
+   core_dev = dest_dev;
+ 
++#ifdef GRUB_SETUP_BIOS
++  /* A whole regular-file image is independent of the build host's root. */
++  const char *image_path = dest_dev->disk
++    ? grub_util_biosdisk_get_osdev (dest_dev->disk) : NULL;
++  struct stat image_stat;
++  if (image_path && !dest_dev->disk->partition
++      && lstat (image_path, &image_stat) == 0
++      && S_ISREG (image_stat.st_mode))
++    {
++      root = xstrdup (dest);
++      root_dev = grub_device_open (root);
++      if (!root_dev)
++        grub_util_error ("%s", grub_errmsg);
++      grub_util_info ("using mapped regular image `%s' as root device", root);
++    }
++  else
++#endif
+   {
+     char **root_devices = grub_guess_root_devices (dir);
+     char **cur;

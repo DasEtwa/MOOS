@@ -8,6 +8,10 @@ MOOS_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 # Replace Buildroot's unused generic BIOS placeholder too; the image contains
 # one coherent Native boot configuration, without a device-name root target.
 cp "$MOOS_ROOT/system/native/grub.cfg" "$target_dir/boot/grub/grub.cfg"
+mkdir -p "$target_dir/var/lib/moos"
+chmod 555 "$target_dir/var/lib/moos"
+chmod 755 "$target_dir/etc/init.d/S20moos-state"
+chmod 755 "$target_dir/etc/init.d/S01seedrng"
 . "$target_dir/etc/moos-release"
 . "$target_dir/etc/moos-platform"
 

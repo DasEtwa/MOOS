@@ -1,0 +1,3 @@
+# Distribution clones must not share credited entropy on a system slot.
+# This remains transient until persistent entropy ownership is reviewed.
+SEEDRNG_ARGS="--seed-dir=/run/seedrng --skip-credit"

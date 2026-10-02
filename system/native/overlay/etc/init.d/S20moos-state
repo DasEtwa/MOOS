@@ -1,0 +1,123 @@
+#!/bin/sh
+# Native-only early boot glue. No formatter, repair, migration or service.
+set -eu
+PATH=/sbin:/bin:/usr/sbin:/usr/bin
+export PATH
+umask 077
+STATE=/var/lib/moos
+STATUS=/run/moos-native-state
+STATE_SAFE=0
+
+blocked() {
+    trap - 0
+    # Revoke writes even if a later initialization command failed after rw.
+    # Never mount onto an unsafe/symlinked mountpoint.
+    if [ "$STATE_SAFE" -eq 1 ]; then
+        if mountpoint -q "$STATE"; then
+            if ! mount -o remount,ro "$STATE"; then
+                umount "$STATE" || echo 'MOOS Native state: readonly enforcement failed'
+            fi
+        fi
+        if ! mountpoint -q "$STATE"; then
+            mount -t tmpfs -o ro,size=4096,mode=000,nodev,nosuid,noexec tmpfs "$STATE" ||
+                echo 'MOOS Native state: readonly blocker unavailable; services MUST remain blocked'
+        fi
+    fi
+    printf 'BLOCKED\n' > "$STATUS" || true
+    printf 'MOOS Native state: DATA NOT AVAILABLE (%s); stateful services BLOCKED\n' "$1"
+    exit 0
+}
+
+file_metadata() {
+    [ -f "$1" ] && [ ! -L "$1" ] &&
+        [ "$(stat -c '%u:%g:%a:%h:%s' "$1")" = "0:0:600:1:$2" ]
+}
+
+valid_identity() {
+    file_metadata "$STATE/identity/installation-id" 37 &&
+        IFS= read -r persisted_id < "$STATE/identity/installation-id" &&
+        printf '%s\n' "$persisted_id" |
+            grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+}
+
+case "${1:-}" in
+    stop)
+        sync
+        if mountpoint -q "$STATE"; then umount "$STATE"; fi
+        exit 0 ;;
+    start) ;;
+    *) echo 'Usage: S20moos-state start|stop' >&2; exit 2 ;;
+esac
+trap 'blocked "initialization command failed"' 0
+
+# All runtime status is transient. No identity or state is saved in SYSTEM_A.
+[ -d "$STATE" ] && [ ! -L "$STATE" ] || blocked 'unsafe mountpoint'
+STATE_SAFE=1
+mountpoint -q "$STATE" && blocked 'unexpected pre-existing mount'
+printf 'BLOCKED\n' > "$STATUS"
+root_number=$(awk '$5 == "/" {print $3; exit}' /proc/self/mountinfo)
+root_partition=$(readlink -f "/sys/dev/block/$root_number")
+[ -f "$root_partition/partition" ] || blocked 'root is not a partition'
+grep -qx 'PARTNAME=SYSTEM_A' "$root_partition/uevent" || blocked 'wrong system role'
+root_disk=$(dirname "$root_partition")
+data_device=''
+data_count=0
+for partition in "$root_disk"/*/partition; do
+    [ -f "$partition" ] || continue
+    partition_dir=$(dirname "$partition")
+    if grep -qx 'PARTNAME=DATA' "$partition_dir/uevent"; then
+        data_count=$((data_count + 1))
+        data_device="/dev/$(basename "$partition_dir")"
+    fi
+done
+[ "$data_count" -eq 1 ] || blocked 'missing or ambiguous DATA on system disk'
+[ -b "$data_device" ] || blocked 'DATA device unavailable'
+probe=$(blkid "$data_device") || blocked 'DATA probe failed'
+printf '%s\n' "$probe" | grep -Fq 'LABEL="MOOS_DATA"' || blocked 'DATA label mismatch'
+printf '%s\n' "$probe" | grep -Fq 'UUID="4d4f4f53-0000-4000-8000-000000000005"' || blocked 'DATA UUID mismatch'
+printf '%s\n' "$probe" | grep -Fq 'TYPE="ext4"' || blocked 'DATA filesystem mismatch'
+
+# No journal replay or writes before schema/ownership/identity validation.
+mount -t ext4 -o ro,noload,nodev,nosuid,noexec "$data_device" "$STATE" || blocked 'DATA mount failed'
+[ "$(stat -c '%u:%g:%a' "$STATE")" = '0:0:700' ] || blocked 'unsafe DATA ownership'
+file_metadata "$STATE/state-version" 2 || blocked 'invalid state schema metadata'
+IFS= read -r state_version < "$STATE/state-version" || blocked 'invalid state schema encoding'
+[ "$state_version" = 1 ] || blocked 'unsupported state schema'
+for directory in identity config; do
+    [ ! -L "$STATE/$directory" ] || blocked 'symlinked state directory'
+    if [ -e "$STATE/$directory" ]; then
+        [ -d "$STATE/$directory" ] &&
+            [ "$(stat -c '%u:%g:%a' "$STATE/$directory")" = '0:0:700' ] || blocked 'unsafe state directory'
+    fi
+done
+new_identity=''
+if [ -e "$STATE/identity/installation-id" ] || [ -L "$STATE/identity/installation-id" ]; then
+    valid_identity || blocked 'invalid installation identity'
+else
+    [ ! -e "$STATE/identity" ] || blocked 'incomplete identity; recovery required'
+    # Linux >=5.6 /dev/random waits for CRNG initialization. Bound that wait;
+    # never use early uninitialized UUID bytes or a hardware-derived fallback.
+    timeout 20 dd if=/dev/random of=/dev/null bs=1 count=1 2>/dev/null || blocked 'entropy not ready'
+    new_identity=$(cat /proc/sys/kernel/random/uuid)
+    printf '%s\n' "$new_identity" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' || blocked 'invalid random UUID'
+fi
+mount -o remount,rw "$STATE" || blocked 'DATA cannot become writable'
+for directory in identity config; do
+    if [ ! -d "$STATE/$directory" ]; then mkdir -m 700 "$STATE/$directory" || blocked 'state initialization failed'; fi
+done
+if [ -n "$new_identity" ]; then
+    temporary=$(mktemp "$STATE/identity/.installation-id.XXXXXX") || blocked 'identity staging failed'
+    printf '%s\n' "$new_identity" > "$temporary"
+    chmod 600 "$temporary"
+    # No-clobber publication: an existing identity is never overwritten.
+    if ! ln "$temporary" "$STATE/identity/installation-id"; then
+        rm -f "$temporary"
+        blocked 'identity publication conflict'
+    fi
+    rm -f "$temporary"
+fi
+valid_identity || blocked 'identity validation failed'
+sync
+printf 'READY\n' > "$STATUS"
+trap - 0
+echo 'MOOS Native state: DATA READY at /var/lib/moos; schema 1; identity READY; SYSTEM_B RESERVED'

@@ -1,0 +1,10 @@
+#!/bin/sh
+# Native entropy glue is bounded and transient; clones share no credited seed.
+set -eu
+case "${1:-}" in
+    start|stop|restart|reload)
+        timeout 2 seedrng --seed-dir=/run/seedrng --skip-credit >/dev/null 2>&1 ||
+            echo 'MOOS Native entropy: transient seed unavailable; state init checks CRNG readiness'
+        ;;
+    *) echo 'Usage: S01seedrng start|stop|restart|reload' >&2; exit 2 ;;
+esac
