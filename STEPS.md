@@ -34,8 +34,29 @@ no remaining blocking findings; Personal/terminal/Host/Protocol regressions pass
 N2 establishes a tested system/DATA contract, not production installation readiness.
 Physical hardware, installer, installed multi-disk identities, full recovery,
 signed Native provenance, packages/Store/security update service and A/B remain
-NOT VERIFIED/deferred. The next Native scope is N3 design/media and safe local
-plan validation before destructive installation; no real disk writes occur here.
+NOT VERIFIED/deferred in N2. N3 adds its separate restricted installer below;
+N2's dated acceptance is not rewritten by that later work.
+
+Native N3 status: tested on `codex/moos-native-n3-installer`, stacked on open
+PR #44 head `0816d1837bcecfd7592d450fabc5b9ff4d7e5d33`; not merged
+production truth. See [installer contract](docs/native/installer.md) and
+[N3 acceptance](docs/native/acceptance/N3.md). Complete Windows/WSL2 Core and
+installer builds pass; repeated generation is byte-equal. The 131 MiB offline
+raw media boots through BIOS/UEFI GRUB into a local Rust installer. Only marked
+QEMU virtio test targets are eligible. Typed plans, independent digest-bound
+erase/preserve confirmation, target revalidation and final written-Core checks
+precede COMPLETE. Two fresh installs receive unique GPT and installation IDs;
+both boot with DATA READY and actual blank-root rejection. BIOS/UEFI also boot
+the selected second of two installed disks. Preserve reinstall retains the
+entire DATA hash, installation ID, marker and GPT IDs in both modes. Source,
+firmware and unrelated disk stay unchanged; corrupt payload/state/layout and
+stale layout plans fail closed. Interruption never reports COMPLETE.
+Personal/Host/Protocol/Gateway/source-iOS regressions and Rust checks pass.
+Final independent source/evidence review passed without remaining blockers.
+Physical installation, live hotplug, power-loss recovery, signed Native
+provenance, Secure Boot, ISO, packages/Store, A/B and security update service
+remain NOT VERIFIED/deferred. Next scope: N4 typed local/app-assisted setup
+and first boot, preserving installer safety authority and the hardware gate.
 
 Complete before this roadmap: Buildroot x86_64 Linux 6.18.43 LTS, BusyBox 1.38.0,
 QEMU boot/login/networking, MOOS utilities, reboot/poweroff smoke tests,
