@@ -9,6 +9,7 @@ on:
       - "Cargo.lock"
       - "rust-toolchain.toml"
       - "host/moos-gateway/**"
+      - "native/installer/**"
       - "host/moosd.py"
       - "host/moos_protocol.py"
       - "host/moos_runtime.py"
@@ -51,6 +52,7 @@ on:
       - "Cargo.lock"
       - "rust-toolchain.toml"
       - "host/moos-gateway/**"
+      - "native/installer/**"
       - "host/moosd.py"
       - "host/moos_protocol.py"
       - "host/moos_runtime.py"
@@ -113,7 +115,12 @@ jobs:
           rustc --version --verbose
           cargo --version
 
-      - name: Format, lint, and test the Rust Gateway
+      - name: Install read-only GPT contract test tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y fdisk
+
+      - name: Format, lint, and test the Rust Gateway and Native installer
         run: |
           cargo fmt --all -- --check
           cargo clippy --workspace --all-targets --all-features --locked -- -D warnings

@@ -45,9 +45,11 @@ def regular_file(path):
     return info
 
 
-def read_gpt(path, *, strict_roles=True):
+def read_gpt(path, *, strict_roles=True, installed=False, media=False):
     info = regular_file(path)
-    if info.st_size != DISK_SIZE:
+    expected_size = 131 * MIB if media else DISK_SIZE
+    expected_id = uuid.UUID('4d4f4f53-0000-4000-9000-000000000000') if media else DISK_UUID
+    if media and installed or (not installed and info.st_size != expected_size) or (installed and not 192 * MIB <= info.st_size <= 64 * 1024**3):
         raise ValueError('truncated or unexpected Native GPT disk size')
     with Path(path).open('rb') as stream:
         mbr = stream.read(512)
@@ -66,9 +68,10 @@ def read_gpt(path, *, strict_roles=True):
             struct.pack_into('<I', data, 16, 0)
             if zlib.crc32(data[:size]) != crc:
                 raise ValueError('GPT header checksum mismatch')
-            if current != lba or count != 128 or entry_size != 128 or uuid.UUID(bytes_le=disk) != DISK_UUID:
+            disk_id = uuid.UUID(bytes_le=disk)
+            if current != lba or count != 128 or entry_size != 128 or (not installed and disk_id != expected_id) or (installed and (disk_id.version != 4 or str(disk_id).startswith('4d4f4f53-'))):
                 raise ValueError('unexpected GPT metadata')
-            if first != 34 or last != info.st_size // 512 - 34:
+            if (first not in (34, 2048) if installed else first != 34) or last != info.st_size // 512 - 34:
                 raise ValueError('invalid GPT usable bounds')
             if table != (2 if lba == 1 else lba - 32):
                 raise ValueError('invalid GPT entry-array location')
@@ -101,11 +104,16 @@ def read_gpt(path, *, strict_roles=True):
         if any(left.last >= right.first for left, right in zip(ordered, ordered[1:])):
             raise ValueError('overlapping GPT partitions')
         if strict_roles:
-            if len(partitions) != len(ROLES):
+            roles = [('BIOS_GRUB',BIOS_TYPE,1,1),('INSTALLER',EFI_TYPE,2,128)] if media else ROLES
+            if len(partitions) != len(roles):
                 raise ValueError('missing or unexpected Native GPT roles')
-            for number, (partition, expected) in enumerate(zip(partitions, ROLES), 1):
+            for number, (partition, expected) in enumerate(zip(partitions, roles), 1):
                 name, kind, offset, size = expected
-                identity = uuid.UUID(f'4d4f4f53-0000-4000-8000-{number:012d}')
+                identity = partition.identity if installed else uuid.UUID(f'4d4f4f53-0000-4000-{9000 if media else 8000}-{number:012d}')
+                if installed and (identity.version != 4 or str(identity).startswith('4d4f4f53-')):
+                    raise ValueError('prototype/invalid installed identity')
+                if installed and name == 'DATA':
+                    size = info.st_size // MIB - 139
                 if (partition.name, partition.kind, partition.identity, partition.offset, partition.size) != (name, kind, identity, offset * MIB, size * MIB):
                     raise ValueError('incorrect Native GPT partition role: ' + name)
                 if partition.flags != ((1 << 63) if name == 'SYSTEM_B' else 0):

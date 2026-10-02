@@ -215,6 +215,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "moos-native-installer"
+version = "0.1.0"
+dependencies = [
+ "getrandom",
+ "serde",
+ "serde_json",
+ "sha2",
+ "uuid",
+]
+
+[[package]]
 name = "nix"
 version = "0.31.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

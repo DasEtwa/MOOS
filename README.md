@@ -15,6 +15,12 @@ build/test commands, boundaries, limitations and the
 ordered Native roadmap. Building MOOS under WSL is distinct from implementing
 a complete WSL runtime backend.
 
+The stacked N3 work adds a separate offline, locally guided
+[Native installer](docs/native/installer.md). Its experimental safety gate permits
+only explicitly marked disposable QEMU targets; it installs Core only and is
+not approved for physical disks or production installation. See the
+[N3 acceptance record](docs/native/acceptance/N3.md) for observed evidence.
+
 The [documentation index](docs/README.md) separates production contracts,
 Native architecture, dated acceptance evidence and historical material.
 

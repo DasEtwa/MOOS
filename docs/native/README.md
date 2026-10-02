@@ -110,8 +110,9 @@ The kernel finds SYSTEM_A by PARTUUID instead of a hardcoded device name.
 GPT disk/partition GUIDs, FAT ID and filesystem UUID/hash seeds are fixed
 distribution-image values. The local runtime installation UUID is separate and
 never baked into the image. It is an identifier, not an authentication secret,
-pairing key or authorization grant. N3 must define per-install disk/partition identities
-and unique boot selection before installation on machines with multiple disks.
+pairing key or authorization grant. The separate [N3 installer](installer.md)
+generates per-install disk/partition identities and unique boot references for
+its restricted disposable QEMU targets.
 Attaching identical system-image clones simultaneously is not supported:
 the kernel PARTUUID selection may be ambiguous. DATA selection stays on the
 actual SYSTEM_A disk and never falls back to another disk with the same label.
@@ -129,7 +130,8 @@ provide the underlying GRUB/genimage pattern.
 
 SYSTEM_A is not an enforced immutable system. DATA persistence is an N2
 foundation, not an installation, backup or full recovery guarantee. There is
-no production image provenance path or installer. Use disposable images only;
+no production image provenance path. The separate N3 installer is restricted
+to disposable QEMU targets; use disposable images only;
 valuable state still needs independently verified backups/recovery.
 
 ## Persistent-state ownership and initialization
@@ -246,7 +248,7 @@ updater, Store, package engine or security certification.
 | N0 | Backend-neutral architecture contract in this document |
 | N1 | Separate reproducible x86_64 disk, actual GRUB disk boot, serial, DHCP and locked release root |
 | N2 | BOOT/system/DATA separation, persistent layout, installed identities and recovery semantics |
-| N3 | USB/ISO installation media, safe disk selection, local headless installer; requires N2 |
+| N3 | USB-style raw installer media, typed local plans and safe disk selection; requires N2; ISO deferred |
 | N4 | App-assisted installer, ephemeral QR pairing, typed protocol, LAN-first UX; requires N3 |
 | P1 | Package manifest, verified local store, install/remove/list |
 | P2 | Generations, transactions, atomic activation, rollback, pinning, GC, dependencies/services; requires P1 |
@@ -257,9 +259,11 @@ updater, Store, package engine or security certification.
 | W1 | Complete WSL runtime backend acceptance; building under WSL does not establish this |
 | M1 | macOS virtualization backend (distinct from the historical Personal M1 slice) |
 
-N0/N1 and the N2 disk/state foundation are implemented on this work branch.
+N0/N1, the N2 disk/state foundation and the experimental N3 installer are
+implemented on the stacked work branches, not merged production truth.
 [STEPS](../../STEPS.md) and [N2 acceptance](acceptance/N2.md) distinguish observed results from pending gates; later rows
-are design direction, not permission to skip their prerequisites.
+are design direction, not permission to skip their prerequisites. N3 evidence
+is recorded separately in [N3 acceptance](acceptance/N3.md).
 
 ## Persistent systems and A/B direction
 
@@ -267,7 +271,7 @@ Future Native layouts should separate BOOT, SYSTEM_A, SYSTEM_B and DATA.
 DATA must preserve user data, package state, configuration, credentials,
 pairing, instance data and rollback state through updates. N2 defines mounts,
 ownership and safe schema rejection; migrations and full recovery remain future
-work before installation. U1 writes a complete
+work before production installation. U1 writes a complete
 update to the inactive slot, verifies it, tries boot, confirms health and only
 then marks it good; an unconfirmed failed system must return to the prior slot.
 There is no fake A/B state in this image.
@@ -296,11 +300,12 @@ release provenance remain separate from reproducible bytes
 ([Admin releases](../../ADMIN_RELEASES.md) and
 [Host onboarding](../../HOST_ONBOARDING.md) still apply).
 
-## Installer direction (unimplemented)
+## Installer and later app-assisted direction
 
-USB/ISO boots a headless installer, brings up networking, offers a local setup
-session, optionally pairs the MOOS App, validates a declarative plan, requires
-explicit disk erase confirmation, installs, and reboots into Native. Local
+N3's [offline raw installer](installer.md) provides the local Core installation
+contract on restricted QEMU targets. The future app-assisted flow adds network
+setup and optional MOOS App pairing around that independently validated plan,
+explicit disk confirmation and installation. Local
 installation must work without the app or a MOOS cloud service. The installer
 owns validation and destructive authority; the app is a convenience client.
 

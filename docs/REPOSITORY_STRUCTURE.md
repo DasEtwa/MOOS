@@ -27,3 +27,18 @@ The generated `native-data.ext4` is under ignored `output/`, not source.
 Native disk and persistent-state behavior is separated from this navigation
 cleanup in commits. [The documentation index](README.md) and a cheap local-link
 check cover the moved entry points. No test/import/script paths are reorganized.
+
+## N3 phase 2 audit
+
+N3 adds its local Rust component under `native/installer`, separate boot glue
+under `system/native-installer`, and architecture/evidence under `docs/native`.
+Existing build scripts and test entry points retain their paths. The index
+links the new installer contract and dated N3 evidence.
+
+No root contract, historical report, signed fixture or release input is moved.
+`BUG_AUDIT.md` and `ISSUE_FIXES.md` have repository navigation references and may
+also have external readers; moving them is subordinate to destructive-storage
+safety and is deferred to a dedicated cleanup. Host onboarding and release
+contracts remain active operations documents. `.gitignore` already covers the
+new generated installer output, payloads, target images, logs and Cargo outputs;
+no broader ignore rule hides production source. N1/N2 dated evidence is retained.
