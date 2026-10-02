@@ -10,9 +10,12 @@ MOOS Native adds a distinct experimental headless server/appliance target.
 It is intended for servers, homelabs, appliances and development systems, and
 is not recommended as a primary desktop OS. Its initial disk image exercises
 GRUB boot independently of the existing Personal/QEMU profile. See
-[NATIVE.md](NATIVE.md) for build/test commands, boundaries, limitations and the
+[Native architecture](docs/native/README.md) for build/test commands, boundaries, limitations and the
 ordered Native roadmap. Building MOOS under WSL is distinct from implementing
 a complete WSL runtime backend.
+
+The [documentation index](docs/README.md) separates production contracts,
+Native architecture, dated acceptance evidence and historical material.
 
 The current baseline is a Buildroot-generated x86_64 image that boots in QEMU.
 The default release profile locks root login; the explicitly selected
