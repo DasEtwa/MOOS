@@ -2,8 +2,8 @@
 
 set -eu
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-MOOS_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+MOOS_ROOT=$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)
 BUILDROOT_DIR="$MOOS_ROOT/buildroot"
 OUTPUT_DIR="$MOOS_ROOT/output"
 HOST_TOOLS_DIR="$MOOS_ROOT/host-tools"
@@ -19,7 +19,7 @@ TARGET='personal'
 
 usage() {
     cat <<'EOF'
-Usage: scripts/build.sh [JOBS] [--target personal|native] [--profile development|release] [--jobs JOBS]
+Usage: scripts/build.sh [JOBS] [--target personal|native|native-installer] [--profile development|release] [--jobs JOBS]
 
 The default release profile disables password-based root login and verifies the
 final rootfs image before returning success. The development profile must be
@@ -75,7 +75,7 @@ case "$PROFILE" in
 esac
 case "$TARGET" in
     personal) ;;
-    native)
+    native|native-installer)
         [ "$PROFILE" = 'release' ] || {
             echo 'error: Native supports only the locked release profile' >&2
             exit 2
@@ -86,13 +86,19 @@ case "$TARGET" in
         }
         CONFIG_FILE="$MOOS_ROOT/configs/moos_native_x86_64_defconfig"
         OUTPUT_DIR="$MOOS_ROOT/output/native"
+        if [ "$TARGET" = native-installer ]; then
+            # Core payload is independently built/validated before media generation.
+            "$SCRIPT_DIR/build.sh" --target native --jobs "$JOBS"
+            CONFIG_FILE="$MOOS_ROOT/configs/moos_native_installer_x86_64_defconfig"
+            OUTPUT_DIR="$MOOS_ROOT/output/native-installer"
+        fi
         # Fixed N1 baseline epoch; callers may select another recorded build epoch.
         SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1790812800}
         E2FSPROGS_FAKE_TIME=$SOURCE_DATE_EPOCH
         TZ=UTC
         export SOURCE_DATE_EPOCH E2FSPROGS_FAKE_TIME TZ
         ;;
-    *) echo 'error: --target must be personal or native' >&2; exit 2 ;;
+    *) echo 'error: --target must be personal, native or native-installer' >&2; exit 2 ;;
 esac
 case "$JOBS" in
     ''|*[!0-9]*) echo 'error: jobs must be a positive integer' >&2; exit 2 ;;
@@ -163,7 +169,9 @@ make -C "$BUILDROOT_DIR" \
 echo "Building MOOS with $JOBS parallel jobs"
 make -C "$BUILDROOT_DIR" O="$OUTPUT_DIR" -j"$JOBS"
 
-if [ "$PROFILE" = 'release' ]; then
+if [ "$TARGET" = native-installer ]; then
+    echo 'Installer media built; runtime acceptance and payload integrity are separate gates.'
+elif [ "$PROFILE" = 'release' ]; then
     "$MOOS_ROOT/scripts/validate-release-rootfs.py" \
         --debugfs "$OUTPUT_DIR/host/sbin/debugfs" \
         --rootfs-image "$OUTPUT_DIR/images/rootfs.ext2"
