@@ -400,6 +400,12 @@ impl Disk {
         Ok(hash(&serde_json::to_vec(self)?))
     }
 }
+fn require_unchanged_disk(actual: &Disk, expected: &Disk) -> Result<()> {
+    require(
+        actual == expected,
+        "disk generation or layout changed during install",
+    )
+}
 pub fn discover(source: &str) -> Result<Vec<Disk>> {
     let mut disks = Vec::new();
     let qemu = property(Path::new("/sys/class/dmi/id/sys_vendor")) == "QEMU";
@@ -778,10 +784,27 @@ impl Installer {
         Ok(result)
     }
     fn guard(&self, target: &Disk) -> Result<()> {
-        let mut actual = self.select(&target.serial)?;
-        actual.layout_fingerprint = target.layout_fingerprint.clone();
-        actual.partition_roles = target.partition_roles.clone();
-        require(actual == *target, "disk generation changed during install")
+        require_unchanged_disk(&self.select(&target.serial)?, target)
+    }
+    fn snapshot_layout(&self, target: &Disk, expected: &Layout) -> Result<Disk> {
+        let actual = self.select(&target.serial)?;
+        let mut actual_identity = actual.clone();
+        actual_identity.layout_fingerprint = target.layout_fingerprint.clone();
+        actual_identity.partition_roles = target.partition_roles.clone();
+        require(
+            actual_identity == *target,
+            "disk generation changed while recording intended layout",
+        )?;
+        let disk = pinned_device(&actual.path(), false)?;
+        require(
+            layout(&disk)? == *expected,
+            "disk layout changed while recording intended layout",
+        )?;
+        require(
+            self.select(&target.serial)? == actual,
+            "disk layout changed while recording intended layout",
+        )?;
+        Ok(actual)
     }
     fn state(&self, device: &File) -> Result<String> {
         let dev = alias(device);
@@ -958,6 +981,7 @@ impl Installer {
     }
     pub fn apply(&self, plan: &Plan, confirmation: &str) -> Result<()> {
         let target = self.select(&plan.target.serial)?;
+        let mut guarded_target = target.clone();
         let disk = pinned_device(&target.path(), true)?;
         plan.revalidate(
             &self.select(&plan.target.serial)?,
@@ -1021,13 +1045,16 @@ impl Installer {
                 "written GUID mismatch",
             )?;
         }
-        let parts = self.partitions(&target, &observed)?;
+        if plan.mode == Mode::Fresh {
+            guarded_target = self.snapshot_layout(&target, &plan.layout)?;
+        }
+        let parts = self.partitions(&guarded_target, &observed)?;
         phase("WRITING_SYSTEM");
-        self.guard(&target)?;
+        self.guard(&guarded_target)?;
         copy_payload(&self.payload_dir.join("rootfs.ext2"), &parts[2], 60 * MIB)?;
         zero(&parts[3], 60 * MIB)?;
         phase("WRITING_BOOT");
-        self.guard(&target)?;
+        self.guard(&guarded_target)?;
         copy_payload(
             &self.payload_dir.join("native-boot.vfat"),
             &parts[1],
@@ -1075,11 +1102,11 @@ impl Installer {
         })();
         tool("/bin/umount", &["/run/moos-installer/boot"], b"")?;
         boot_result?;
-        self.guard(&target)?;
-        let bios_hashes = self.embed_bios(plan, &disk)?;
+        self.guard(&guarded_target)?;
+        let bios_hashes = self.embed_bios(plan, &guarded_target, &disk)?;
         if plan.mode == Mode::Fresh {
             phase("INITIALIZING_DATA");
-            self.guard(&target)?;
+            self.guard(&guarded_target)?;
             tool(
                 "/sbin/mkfs.ext4",
                 &[
@@ -1215,7 +1242,7 @@ impl Installer {
         phase("COMPLETE");
         Ok(())
     }
-    fn embed_bios(&self, plan: &Plan, disk: &File) -> Result<[String; 2]> {
+    fn embed_bios(&self, plan: &Plan, guarded_target: &Disk, disk: &File) -> Result<[String; 2]> {
         // GRUB canonicalizes device maps. It therefore receives NO guest device:
         // embed normally on private sparse regular GPT staging, then copy only
         // protective MBR + BIOS_GRUB through the retained target descriptor.
@@ -1275,7 +1302,7 @@ impl Installer {
             ],
             b"",
         )?;
-        self.guard(&plan.target)?;
+        self.guard(guarded_target)?;
         let hashes = [
             range_hash(&staging, 0, 512)?,
             range_hash(&staging, MIB, MIB)?,
@@ -1391,5 +1418,42 @@ mod security_tests {
         )?;
         fs::remove_dir_all(directory)?;
         Ok(())
+    }
+
+    #[test]
+    fn mutation_guard_rejects_layout_and_role_drift() -> Result<()> {
+        let expected = Disk {
+            kernel_name: "vdb".into(),
+            model: "test".into(),
+            serial: "MOOS-N3-TARGET-00001".into(),
+            wwn: String::new(),
+            size: 512 * MIB,
+            logical_sector: 512,
+            physical_sector: 512,
+            removable: false,
+            read_only: false,
+            source: false,
+            sys_device: "/sys/devices/test".into(),
+            device_number: "254:16".into(),
+            disk_sequence: 2,
+            layout_fingerprint: "planned".into(),
+            partition_roles: vec!["1:MOOS_BIOS:2048:2048".into()],
+            eligible: true,
+        };
+        require_unchanged_disk(&expected, &expected)?;
+        let mut changed = expected.clone();
+        changed.layout_fingerprint = "changed".into();
+        require(
+            require_unchanged_disk(&changed, &expected).is_err(),
+            "layout fingerprint drift passed the mutation guard",
+        )?;
+        changed = expected.clone();
+        changed
+            .partition_roles
+            .push("2:MOOS_BOOT:4096:32768".into());
+        require(
+            require_unchanged_disk(&changed, &expected).is_err(),
+            "partition role drift passed the mutation guard",
+        )
     }
 }
