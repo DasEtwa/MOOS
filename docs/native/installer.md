@@ -20,7 +20,8 @@ serial field is limited to 20 bytes. Serial uniqueness is checked across
 discovered candidates; it is not an authentication claim. Physical disks,
 other virtual devices and readonly disks remain ineligible. The Host runner
 permits only fixed private single-link 0600 regular target files in a test-owned
-0700 `/tmp/moos-native-installer-*` workspace. No Host block device, symlink,
+0700 `/tmp/moos-native-installer-*` workspace, and N3 acceptance targets are
+exactly 512 MiB. No Host block device, symlink,
 hardlink, canonical output or source inode is a writable target. Source media
 and firmware are bound readonly; target writes stay in disposable files.
 The runner pins checked file inodes with O_PATH/O_NOFOLLOW and Bubblewrap's
@@ -44,12 +45,17 @@ than being loaded wholesale into RAM. Expected disk size is 131 MiB; measured
 runtime/artifact sizes belong in the acceptance record. BIOS and UEFI use real
 disk boot. UEFI uses the fallback loader without firmware NVRAM writes. ISO and
 Secure Boot are deferred. The console launches the installer, no login/getty
-or root-shell fallback; root credentials remain locked.
+or automatic failure shell; root credentials remain locked. Because GRUB and
+the boot payload are not authenticated, a party controlling the boot console
+ can edit the command line to request an initramfs shell. Root locking is not
+ authenticated-boot protection.
 
 The bounded schema-1 manifest contains version and exact role/file/size/SHA256
 for BOOT, SYSTEM_A, BIOS boot/core, kernel and EFI fallback loader. These are
 allowlisted files, not scripts. All payload bytes are checked before destructive
-mutation and checked again before COMPLETE. SHA256 establishes integrity only;
+mutation and checked again before COMPLETE. BIOS inputs are copied to private
+staging and rehashed against the planned manifest before GRUB processes them.
+SHA256 establishes integrity only;
 reproducible bytes and co-located hashes establish no publisher authentication.
 No signing key or unmerged PR #41 code is used.
 
@@ -74,7 +80,9 @@ and are consumed on a confirmation attempt; changing or cancelling a plan
 invalidates its confirmation. No client-authored serialized plan is applied.
 
 The console displays exact model (or unavailable), serial, size, mode and whether
-DATA survives. Fresh mode displays **ALL DATA ON THIS TARGET WILL BE ERASED**.
+DATA survives. Fresh mode displays **ALL DATA ON THIS TARGET WILL BE ERASED**,
+meaning the prior partition/filesystem is replaced and is no longer selected
+by MOOS. It is not cryptographic sanitization; raw remnants may remain on media.
 It requires `confirm ERASE <16-hex-plan-digest>`; preserve mode requires a distinct
 `confirm PRESERVE <16-hex-plan-digest>`. A generic yes/constant token is insufficient.
 The installer re-inspects the target and payload before writes. It retains the
@@ -101,7 +109,9 @@ Fresh installation creates random UUIDv4 disk and five partition GUIDs from
 OS getrandom; no hardware/timestamp/cloud derivation. Prototype GUIDs are
 explicitly rejected as installed identities. BOOT has a derived random FAT ID
 and an exact full-BOOT-GUID marker. Supported GRUB file search selects that
-marker; kernel root uses the unique SYSTEM_A PARTUUID. The full-GUID marker
+ marker; kernel root uses the unique SYSTEM_A PARTUUID. The Native kernel rejects
+ early root lookup when more than one attached partition has that PARTUUID, so
+ byte-cloned installed disks fail before mounting either ambiguous root. The full-GUID marker
 avoids depending solely on a 32-bit FAT ID for multi-disk selection.
 BIOS core starts with `(,gpt2)/boot/grub`, using the firmware-selected disk
 before loading its configuration; it does not initially force `hd0`.
@@ -113,7 +123,9 @@ GPT GUIDs and software installation identity are distinct. Fresh installation
 creates one random installation ID in DATA (root:root 0600), schema `1\n`,
 and root:root 0700 DATA/identity/config. First boot validates/reuses it; it is
 not a credential. Distribution media contains no installation identity.
-Cloning initialized DATA retains identity; automatic cloning repair is absent.
+ Cloning initialized DATA retains identity; automatic cloning repair is absent.
+ A single clone can boot, but original and clone must not be attached together:
+ their duplicate SYSTEM_A identity is rejected rather than chosen by enumeration.
 
 SYSTEM_A is writable and receives the exact locked-release Core rootfs.
 SYSTEM_B is zero-filled/unformatted and no-automount, reserved for future U1.
@@ -138,6 +150,10 @@ Preserve mode retains all GPT identities and the complete DATA filesystem bytes.
 SYSTEM_A and reserved SYSTEM_B only. No DATA formatter is called. Foreign,
 damaged or ambiguous layout/state makes preserve unavailable, without falling
 back to erase. A fresh erase needs a separate plan and confirmation.
+N3 preserve is reinstall, not a freshness-aware updater: it has no authenticated
+version or Core/DATA compatibility epoch. Older media can replace a newer
+schema-1 Core, and legacy N3 media must be retired before SYSTEM_B gains future
+rollback meaning.
 
 Phases are PLANNED, CONFIRMED, WRITING_LAYOUT (fresh only), WRITING_SYSTEM,
 WRITING_BOOT, INITIALIZING_DATA (fresh only), VERIFYING and COMPLETE. Errors

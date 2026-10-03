@@ -1,6 +1,6 @@
 # MOOS rules
 
-Rules version: 2.1
+Rules version: 2.2
 Status: normative project constitution
 
 These rules define the project-wide security, trust, architecture, release,
@@ -767,6 +767,24 @@ Safe retries SHOULD inspect actual system state rather than trust a single
 
 Interrupted mutation SHOULD leave either the prior valid state or a defined
 recoverable state.
+
+### Destructive storage authority
+
+A path or enumeration name alone MUST NOT establish storage-device identity.
+
+Before a destructive storage operation, MOOS MUST:
+
+1. inspect and identify the exact target using stable observable facts;
+2. create an immutable typed plan describing the intended mutation;
+3. obtain explicit confirmation bound to that exact plan and target;
+4. revalidate the target and plan immediately before destructive commit; and
+5. fail closed if identity, topology, persistent state, or source/target
+   separation is ambiguous or has changed.
+
+Changing the plan or replacing the target MUST invalidate confirmation.
+Unknown, corrupt, or newer persistent state MUST NOT silently become fresh
+state, and a preserve operation MUST NOT silently fall back to destructive
+reinitialization.
 
 ---
 
