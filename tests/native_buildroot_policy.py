@@ -7,6 +7,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 PREPARE = ROOT / 'scripts/prepare-buildroot-tree.sh'
+CLEAN_GIT_CACHE = ROOT / 'scripts/clean-buildroot-git-cache.sh'
+BUILD = ROOT / 'scripts/build.sh'
 
 
 def run(*args, check=True):
@@ -52,7 +54,60 @@ class BuildrootPolicy(unittest.TestCase):
             (repo / 'dl/cache.tar').write_text('hash-verified cache fixture\n')
             (repo / 'dl/nested').mkdir()
             (repo / 'dl/nested/cache.tar').write_text('nested hash-verified cache fixture\n')
+
+            git_cache = repo / 'dl/glibc/git'
+            git_cache.mkdir(parents=True)
+            run('git', '-C', str(git_cache), 'init', '-q')
+            marker = root / 'hook-ran'
+            hook = git_cache / '.git/hooks/reference-transaction'
+            hook.write_text(f'#!/bin/sh\nprintf executed > "{marker}"\n')
+            hook.chmod(0o755)
+            rejected = run('sh', str(PREPARE), str(repo), str(patches), check=False)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn('refusing reusable Buildroot Git caches', rejected.stderr)
+            self.assertFalse(marker.exists(), 'untrusted Git hook executed during inspection')
+
+            run('sh', str(CLEAN_GIT_CACHE), str(repo))
+            self.assertFalse(git_cache.exists())
+            self.assertTrue((repo / 'dl/cache.tar').is_file())
+            self.assertTrue((repo / 'dl/nested/cache.tar').is_file())
             run('sh', str(PREPARE), str(repo), str(patches))
+
+            external = root / 'external-git-cache'
+            external.mkdir()
+            sentinel = external / 'preserve-me'
+            sentinel.write_text('outside the Buildroot tree\n')
+            symlink_cache = repo / 'dl/attacker/git'
+            symlink_cache.parent.mkdir(parents=True)
+            symlink_cache.symlink_to(external, target_is_directory=True)
+            rejected = run('sh', str(PREPARE), str(repo), str(patches), check=False)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn('refusing symlinks in Buildroot download cache', rejected.stderr)
+            cleanup = run('sh', str(CLEAN_GIT_CACHE), str(repo), check=False)
+            self.assertNotEqual(cleanup.returncode, 0)
+            self.assertTrue(sentinel.is_file(), 'cache cleanup followed a symlink')
+            symlink_cache.unlink()
+
+            linked_buildroot = root / 'buildroot-symlink'
+            linked_buildroot.mkdir()
+            (linked_buildroot / 'dl').symlink_to(external, target_is_directory=True)
+            rejected = run('sh', str(PREPARE), str(linked_buildroot), str(patches), check=False)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn('refusing symlinked Buildroot download directory', rejected.stderr)
+            cleanup = run('sh', str(CLEAN_GIT_CACHE), str(linked_buildroot), check=False)
+            self.assertNotEqual(cleanup.returncode, 0)
+            self.assertTrue(sentinel.is_file(), 'cleanup followed a symlinked dl root')
+
+            newline_dir = repo / '\ndl'
+            newline_dir.mkdir()
+            (newline_dir / 'outside-cache').write_text('not a download-cache entry\n')
+            rejected = run('sh', str(PREPARE), str(repo), str(patches), check=False)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn('untracked Buildroot inputs', rejected.stderr)
+            (newline_dir / 'outside-cache').unlink()
+            newline_dir.rmdir()
+            run('sh', str(PREPARE), str(repo), str(patches))
+
             (repo / 'dlx').mkdir()
             (repo / 'dlx/cache.tar').write_text('unverified lookalike\n')
             rejected = run('sh', str(PREPARE), str(repo), str(patches), check=False)
@@ -88,6 +143,17 @@ class BuildrootPolicy(unittest.TestCase):
         ]:
             config = (ROOT / 'configs' / name).read_text()
             self.assertIn('BR2_DOWNLOAD_FORCE_CHECK_HASHES=y', config, name)
+
+    def test_build_pins_and_cleans_the_checked_download_cache(self):
+        build = BUILD.read_text()
+        self.assertIn('BR2_DL_DIR="$BUILDROOT_DIR/dl"', build)
+        self.assertIn('export BR2_DL_DIR', build)
+        self.assertIn('clean-buildroot-git-cache.sh', build)
+        prepare_at = build.index('prepare-buildroot-tree.sh')
+        cleanup_trap_at = build.index('trap cleanup_buildroot_git_cache 0')
+        first_build_at = build.index('make -C "$BUILDROOT_DIR"')
+        self.assertLess(prepare_at, cleanup_trap_at)
+        self.assertLess(cleanup_trap_at, first_build_at)
 
 
 if __name__ == '__main__':

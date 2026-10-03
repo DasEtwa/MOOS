@@ -13,6 +13,9 @@ BUILDROOT_REPO='https://github.com/buildroot/buildroot.git'
 BUILDROOT_RELEASE='2026.05.1'
 BUILDROOT_REF='cb857ba4c87a93e5265a9e4a3f32071abf39e14a'
 BUILDROOT_PATCH_DIR="$MOOS_ROOT/patches/buildroot"
+# Buildroot honors this environment override, so pin it to the inspected cache.
+BR2_DL_DIR="$BUILDROOT_DIR/dl"
+export BR2_DL_DIR
 JOBS=4
 PROFILE='release'
 TARGET='personal'
@@ -134,6 +137,17 @@ if [ "$current_ref" != "$BUILDROOT_REF" ]; then
 fi
 
 "$SCRIPT_DIR/prepare-buildroot-tree.sh" "$BUILDROOT_DIR" "$BUILDROOT_PATCH_DIR"
+
+cleanup_buildroot_git_cache() {
+    cleanup_status=$?
+    trap - 0
+    if ! sh "$SCRIPT_DIR/clean-buildroot-git-cache.sh" "$BUILDROOT_DIR"; then
+        echo 'error: failed to remove Buildroot Git cache' >&2
+        [ "$cleanup_status" -ne 0 ] || cleanup_status=1
+    fi
+    exit "$cleanup_status"
+}
+trap cleanup_buildroot_git_cache 0
 
 mkdir -p "$HOST_TOOLS_DIR" "$OUTPUT_DIR"
 

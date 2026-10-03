@@ -10,10 +10,41 @@ fi
 buildroot_dir=$1
 patch_dir=$2
 
-# Buildroot's hash-verified source cache lives in dl/. It is the only allowed
-# untracked source-tree content; out-of-tree build output lives elsewhere.
-untracked_inputs=$(git -C "$buildroot_dir" ls-files --others --exclude-standard -- . ':(exclude)dl/**')
-ignored_inputs=$(git -C "$buildroot_dir" ls-files --others --ignored --exclude-standard -- . ':(exclude)dl/**')
+# Passive hash-checked downloads live in dl/. Reusable Git repositories there
+# are active inputs: Git can run local hooks/config while refreshing them, before
+# Buildroot verifies the resulting source archive. Reject those and any symlink.
+dl_dir="$buildroot_dir/dl"
+if [ -L "$dl_dir" ]; then
+    echo 'error: refusing symlinked Buildroot download directory' >&2
+    exit 1
+fi
+if [ -d "$dl_dir" ]; then
+    symlinks=$(find "$dl_dir" -type l -print)
+    git_caches=$(find "$dl_dir" -mindepth 2 -maxdepth 2 -type d -name git -print)
+    if [ -n "$symlinks" ]; then
+        echo 'error: refusing symlinks in Buildroot download cache:' >&2
+        printf '%s\n' "$symlinks" >&2
+        exit 1
+    fi
+    if [ -n "$git_caches" ]; then
+        echo 'error: refusing reusable Buildroot Git caches:' >&2
+        printf '%s\n' "$git_caches" >&2
+        exit 1
+    fi
+fi
+
+# Force quoted paths so newline/control-character paths cannot be split into
+# records that look like permitted root-relative download-cache paths.
+untracked_inputs=$(
+    git -c core.quotePath=true -C "$buildroot_dir" \
+        ls-files --others --exclude-standard -- . ':(exclude,top,glob)dl/**' |
+        sed '/^dl\//d'
+)
+ignored_inputs=$(
+    git -c core.quotePath=true -C "$buildroot_dir" \
+        ls-files --others --ignored --exclude-standard -- . ':(exclude,top,glob)dl/**' |
+        sed '/^dl\//d'
+)
 if [ -n "$untracked_inputs$ignored_inputs" ]; then
     echo 'error: refusing untracked Buildroot inputs:' >&2
     printf '%s\n%s\n' "$untracked_inputs" "$ignored_inputs" >&2

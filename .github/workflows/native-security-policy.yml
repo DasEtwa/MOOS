@@ -42,8 +42,8 @@ jobs:
           PUSH_BEFORE: ${{ github.event.before }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          sh -n scripts/build.sh scripts/prepare-buildroot-tree.sh scripts/native-installer-post-build.sh scripts/native-installer-post-image.sh
-          shellcheck --severity=warning --exclude=SC1007 scripts/build.sh scripts/prepare-buildroot-tree.sh scripts/native-installer-post-build.sh scripts/native-installer-post-image.sh
+          sh -n scripts/build.sh scripts/prepare-buildroot-tree.sh scripts/clean-buildroot-git-cache.sh scripts/native-installer-post-build.sh scripts/native-installer-post-image.sh
+          shellcheck --severity=warning --exclude=SC1007 scripts/build.sh scripts/prepare-buildroot-tree.sh scripts/clean-buildroot-git-cache.sh scripts/native-installer-post-build.sh scripts/native-installer-post-image.sh
           if [ -n "${GITHUB_BASE_REF:-}" ]; then
             git diff --check "origin/$GITHUB_BASE_REF...HEAD"
           elif [ -n "${PUSH_BEFORE:-}" ] && [ "$PUSH_BEFORE" != '0000000000000000000000000000000000000000' ]; then
