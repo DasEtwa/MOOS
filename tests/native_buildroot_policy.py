@@ -2,6 +2,7 @@
 """Buildroot preparation rejects undeclared inputs except the checked dl cache."""
 from pathlib import Path
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -187,6 +188,103 @@ class BuildrootPolicy(unittest.TestCase):
         first_build_at = build.index('make -C "$BUILDROOT_DIR"')
         self.assertLess(prepare_at, cleanup_trap_at)
         self.assertLess(cleanup_trap_at, first_build_at)
+
+    def test_installer_rust_build_scripts_use_a_host_runnable_abi(self):
+        post_build = (ROOT / 'scripts/native-installer-post-build.sh').read_text()
+        self.assertIn('host_linker=$(command -v cc)', post_build)
+        self.assertIn('CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=$host_linker', post_build)
+        self.assertIn('unset MAKEFLAGS MFLAGS GNUMAKEFLAGS CARGO_MAKEFLAGS', post_build)
+        self.assertIn('getconf GNU_LIBC_VERSION', post_build)
+        self.assertIn('target_libc="$target_dir/lib/libc.so.6"', post_build)
+        self.assertNotIn('$HOST_DIR/bin/x86_64-buildroot-linux-gnu-gcc', post_build)
+
+    @unittest.skipUnless(shutil.which('sh'), 'POSIX shell required for Buildroot post-build harness')
+    def test_installer_rust_build_abi_guard_and_environment(self):
+        def run_case(host_glibc='2.35', target_versions='GLIBC_2.2.5\nGLIBC_2.39',
+                     machine='x86_64-linux-gnu', include_target_libc=True):
+            with tempfile.TemporaryDirectory(prefix='moos-installer-abi-') as name:
+                root = Path(name)
+                fake_bin = root / 'mock-bin'
+                fake_bin.mkdir()
+                for tool, body in {
+                    'cc': '#!/bin/sh\nprintf \'%s\\n\' "$MOCK_CC_MACHINE"\n',
+                    'getconf': '#!/bin/sh\nprintf \'glibc %s\\n\' "$MOCK_HOST_GLIBC"\n',
+                    'strings': '#!/bin/sh\nprintf \'%s\\n\' "$MOCK_STRINGS_OUTPUT"\n',
+                    'cargo': (
+                        '#!/bin/sh\n'
+                        'printf "MAKEFLAGS=<%s>\\nMFLAGS=<%s>\\nGNUMAKEFLAGS=<%s>\\n" '
+                        '"${MAKEFLAGS-}" "${MFLAGS-}" "${GNUMAKEFLAGS-}" > "$MOCK_CARGO_LOG"\n'
+                        'printf "CARGO_MAKEFLAGS=<%s>\\nLINKER=<%s>\\n" '
+                        '"${CARGO_MAKEFLAGS-}" "${CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER-}" '
+                        '>> "$MOCK_CARGO_LOG"\n'
+                    ),
+                }.items():
+                    path = fake_bin / tool
+                    path.write_text(body)
+                    path.chmod(0o755)
+
+                target_dir = root / 'target root'
+                for relative in ('usr/bin', 'boot/grub', 'etc', 'lib'):
+                    (target_dir / relative).mkdir(parents=True, exist_ok=True)
+                (target_dir / 'etc/shadow').write_text('root:!:locked fixture\n')
+                if include_target_libc:
+                    (target_dir / 'lib/libc.so.6').write_text('mock target libc\n')
+                build_dir = root / 'build dir'
+                cargo_output = (
+                    build_dir / 'moos-installer-cargo/x86_64-unknown-linux-gnu/release'
+                    / 'moos-native-installer'
+                )
+                cargo_output.parent.mkdir(parents=True)
+                cargo_output.write_bytes(b'mock installer binary')
+                cargo_log = root / 'cargo-env.txt'
+                env = os.environ.copy()
+                env['PATH'] = str(fake_bin) + os.pathsep + env.get('PATH', '')
+                env.update({
+                    'BUILD_DIR': str(build_dir),
+                    'MOCK_CC_MACHINE': machine,
+                    'MOCK_HOST_GLIBC': host_glibc,
+                    'MOCK_STRINGS_OUTPUT': target_versions,
+                    'MOCK_CARGO_LOG': str(cargo_log),
+                    'MAKEFLAGS': '--jobserver-auth=3,4 -j',
+                    'MFLAGS': '-j',
+                    'GNUMAKEFLAGS': '--jobserver-auth=5,6 -j',
+                    'CARGO_MAKEFLAGS': '--jobserver-auth=7,8 -j',
+                })
+                result = run('sh', str(ROOT / 'scripts/native-installer-post-build.sh'),
+                             str(target_dir), check=False, env=env)
+                copied = (target_dir / 'usr/bin/moos-native-installer').is_file()
+                return (
+                    result,
+                    cargo_log.read_text() if cargo_log.exists() else None,
+                    copied,
+                    str(fake_bin / 'cc'),
+                )
+
+        accepted, cargo_env, copied, mock_linker = run_case()
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.assertIsNotNone(cargo_env)
+        self.assertIn('MAKEFLAGS=<>', cargo_env)
+        self.assertIn('MFLAGS=<>', cargo_env)
+        self.assertIn('GNUMAKEFLAGS=<>', cargo_env)
+        self.assertIn('CARGO_MAKEFLAGS=<>', cargo_env)
+        self.assertIn(f'LINKER=<{mock_linker}>', cargo_env)
+        self.assertTrue(copied)
+
+        rejected_cases = (
+            {'host_glibc': '2.39', 'target_versions': 'GLIBC_2.2.5\nGLIBC_2.35'},
+            {'machine': 'aarch64-linux-gnu'},
+            {'include_target_libc': False},
+            {'target_versions': 'GLIBC_2.2.5\nGLIBC_PRIVATE'},
+        )
+        for case in rejected_cases:
+            with self.subTest(case=case):
+                result, cargo_env, _, _ = run_case(**case)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIsNone(cargo_env, 'Cargo must not run when ABI compatibility is unknown')
+
+    def test_reproducibility_runs_when_native_build_scripts_change(self):
+        workflow = (ROOT / '.github/workflows/native-reproducibility.yml').read_text()
+        self.assertIn("'scripts/native-*'", workflow)
 
 
 if __name__ == '__main__':
