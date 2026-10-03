@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Buildroot preparation rejects undeclared inputs except the checked dl cache."""
 from pathlib import Path
+import os
 import subprocess
 import tempfile
 import unittest
@@ -11,8 +12,8 @@ CLEAN_GIT_CACHE = ROOT / 'scripts/clean-buildroot-git-cache.sh'
 BUILD = ROOT / 'scripts/build.sh'
 
 
-def run(*args, check=True):
-    return subprocess.run(args, check=check, text=True, capture_output=True)
+def run(*args, check=True, env=None):
+    return subprocess.run(args, check=check, text=True, capture_output=True, env=env)
 
 
 class BuildrootPolicy(unittest.TestCase):
@@ -58,6 +59,11 @@ class BuildrootPolicy(unittest.TestCase):
             git_cache = repo / 'dl/glibc/git'
             git_cache.mkdir(parents=True)
             run('git', '-C', str(git_cache), 'init', '-q')
+            external = root / 'external-git-cache'
+            external.mkdir()
+            sentinel = external / 'preserve-me'
+            sentinel.write_text('outside the Buildroot tree\n')
+            (git_cache / 'legitimate-source-symlink').symlink_to(sentinel)
             marker = root / 'hook-ran'
             hook = git_cache / '.git/hooks/reference-transaction'
             hook.write_text(f'#!/bin/sh\nprintf executed > "{marker}"\n')
@@ -71,12 +77,9 @@ class BuildrootPolicy(unittest.TestCase):
             self.assertFalse(git_cache.exists())
             self.assertTrue((repo / 'dl/cache.tar').is_file())
             self.assertTrue((repo / 'dl/nested/cache.tar').is_file())
+            self.assertTrue(sentinel.is_file(), 'cache cleanup followed an internal symlink')
             run('sh', str(PREPARE), str(repo), str(patches))
 
-            external = root / 'external-git-cache'
-            external.mkdir()
-            sentinel = external / 'preserve-me'
-            sentinel.write_text('outside the Buildroot tree\n')
             symlink_cache = repo / 'dl/attacker/git'
             symlink_cache.parent.mkdir(parents=True)
             symlink_cache.symlink_to(external, target_is_directory=True)
@@ -97,6 +100,31 @@ class BuildrootPolicy(unittest.TestCase):
             cleanup = run('sh', str(CLEAN_GIT_CACHE), str(linked_buildroot), check=False)
             self.assertNotEqual(cleanup.returncode, 0)
             self.assertTrue(sentinel.is_file(), 'cleanup followed a symlinked dl root')
+
+            mounted_cache = repo / 'dl/glibc/git'
+            mounted_cache.mkdir(parents=True)
+            protected = mounted_cache / 'protected-data'
+            protected.write_text('must remain when a mount boundary is reported\n')
+            fake_bin = root / 'fake-bin'
+            fake_bin.mkdir()
+            fake_mountpoint = fake_bin / 'mountpoint'
+            fake_mountpoint.write_text(
+                '#!/bin/sh\n[ "$1" = "-q" ] && [ "$2" = "--" ] && '
+                '[ "$3" = "$TEST_MOUNTPOINT" ]\n'
+            )
+            fake_mountpoint.chmod(0o755)
+            mount_env = os.environ.copy()
+            mount_env['PATH'] = str(fake_bin) + os.pathsep + mount_env.get('PATH', '')
+            mount_env['TEST_MOUNTPOINT'] = str(mounted_cache)
+            rejected = run('sh', str(CLEAN_GIT_CACHE), str(repo), check=False, env=mount_env)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn('mounted Buildroot cache directory', rejected.stderr)
+            self.assertTrue(protected.is_file(), 'cleanup crossed a reported mount boundary')
+            fake_mountpoint.unlink()
+            fake_bin.rmdir()
+            protected.unlink()
+            mounted_cache.rmdir()
+            mounted_cache.parent.rmdir()
 
             newline_dir = repo / '\ndl'
             newline_dir.mkdir()
@@ -146,9 +174,14 @@ class BuildrootPolicy(unittest.TestCase):
 
     def test_build_pins_and_cleans_the_checked_download_cache(self):
         build = BUILD.read_text()
+        cleaner = CLEAN_GIT_CACHE.read_text()
         self.assertIn('BR2_DL_DIR="$BUILDROOT_DIR/dl"', build)
         self.assertIn('export BR2_DL_DIR', build)
         self.assertIn('clean-buildroot-git-cache.sh', build)
+        self.assertIn('mountpoint', cleaner)
+        self.assertIn('-xdev', cleaner)
+        self.assertIn('-delete', cleaner)
+        self.assertNotIn('rm -rf', cleaner)
         prepare_at = build.index('prepare-buildroot-tree.sh')
         cleanup_trap_at = build.index('trap cleanup_buildroot_git_cache 0')
         first_build_at = build.index('make -C "$BUILDROOT_DIR"')

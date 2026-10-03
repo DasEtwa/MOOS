@@ -21,14 +21,14 @@ fi
 if [ -d "$dl_dir" ]; then
     symlinks=$(find "$dl_dir" -type l -print)
     git_caches=$(find "$dl_dir" -mindepth 2 -maxdepth 2 -type d -name git -print)
-    if [ -n "$symlinks" ]; then
-        echo 'error: refusing symlinks in Buildroot download cache:' >&2
-        printf '%s\n' "$symlinks" >&2
-        exit 1
-    fi
     if [ -n "$git_caches" ]; then
         echo 'error: refusing reusable Buildroot Git caches:' >&2
         printf '%s\n' "$git_caches" >&2
+        exit 1
+    fi
+    if [ -n "$symlinks" ]; then
+        echo 'error: refusing symlinks in Buildroot download cache:' >&2
+        printf '%s\n' "$symlinks" >&2
         exit 1
     fi
 fi

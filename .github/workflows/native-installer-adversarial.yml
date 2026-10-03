@@ -21,7 +21,7 @@ jobs:
       - name: Install build and virtual-machine tools
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y build-essential bc bison bubblewrap cpio file flex git libelf-dev libncurses-dev python3 qemu-system-x86 rsync unzip wget
+          sudo apt-get install --no-install-recommends -y build-essential bc bison bubblewrap cpio file flex git libelf-dev libncurses-dev python3 qemu-system-x86 rsync unzip util-linux wget
           rustup toolchain install 1.97.1 --profile minimal
           rustup default 1.97.1
       - name: Build exact installer inputs

@@ -20,7 +20,7 @@ jobs:
       - name: Install policy tools
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y fdisk shellcheck
+          sudo apt-get install --no-install-recommends -y fdisk shellcheck util-linux
       - name: Rust format, lint, and tests
         run: |
           rustup toolchain install 1.97.1 --profile minimal --component clippy --component rustfmt

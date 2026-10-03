@@ -25,7 +25,7 @@ jobs:
       - name: Install clean-build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y build-essential bc bison cpio file flex git libelf-dev libncurses-dev python3 rsync unzip wget
+          sudo apt-get install --no-install-recommends -y build-essential bc bison cpio file flex git libelf-dev libncurses-dev python3 rsync unzip util-linux wget
           rustup toolchain install 1.97.1 --profile minimal
           rustup default 1.97.1
       - name: Build in a fresh runner
