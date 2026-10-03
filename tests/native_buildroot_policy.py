@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Buildroot preparation accepts only the exact declared tracked patch set."""
+"""Buildroot preparation rejects undeclared inputs except the checked dl cache."""
 from pathlib import Path
 import subprocess
 import tempfile
@@ -24,7 +24,7 @@ class BuildrootPolicy(unittest.TestCase):
             run('git', '-C', str(repo), 'config', 'user.name', 'MOOS test')
             (repo / 'tracked').write_text('base\n')
             (repo / 'unrelated').write_text('base\n')
-            (repo / '.gitignore').write_text('ignored-input\ndl/\n')
+            (repo / '.gitignore').write_text('ignored-input\ndl/\n**/nested-cache/\n')
             run('git', '-C', str(repo), 'add', 'tracked', 'unrelated', '.gitignore')
             run('git', '-C', str(repo), 'commit', '-qm', 'base')
             (repo / 'tracked').write_text('expected\n')
@@ -50,7 +50,24 @@ class BuildrootPolicy(unittest.TestCase):
 
             (repo / 'dl').mkdir()
             (repo / 'dl/cache.tar').write_text('hash-verified cache fixture\n')
+            (repo / 'dl/nested').mkdir()
+            (repo / 'dl/nested/cache.tar').write_text('nested hash-verified cache fixture\n')
             run('sh', str(PREPARE), str(repo), str(patches))
+            (repo / 'dlx').mkdir()
+            (repo / 'dlx/cache.tar').write_text('unverified lookalike\n')
+            rejected = run('sh', str(PREPARE), str(repo), str(patches), check=False)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn('untracked Buildroot inputs', rejected.stderr)
+            (repo / 'dlx/cache.tar').unlink()
+            (repo / 'dlx').rmdir()
+            (repo / 'nested/nested-cache').mkdir(parents=True)
+            (repo / 'nested/nested-cache/stale.tar').write_text('ignored stale input\n')
+            rejected = run('sh', str(PREPARE), str(repo), str(patches), check=False)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn('untracked Buildroot inputs', rejected.stderr)
+            (repo / 'nested/nested-cache/stale.tar').unlink()
+            (repo / 'nested/nested-cache').rmdir()
+            (repo / 'nested').rmdir()
 
             (repo / 'unrelated').write_text('attacker-controlled\n')
             rejected = run('sh', str(PREPARE), str(repo), str(patches), check=False)
@@ -61,6 +78,16 @@ class BuildrootPolicy(unittest.TestCase):
             rejected = run('sh', str(PREPARE), str(repo), str(patches), check=False)
             self.assertNotEqual(rejected.returncode, 0)
             self.assertIn('staged Buildroot changes', rejected.stderr)
+
+    def test_every_buildroot_profile_checks_download_hashes(self):
+        for name in [
+            'moos_qemu_x86_64_defconfig',
+            'moos_qemu_x86_64_release_defconfig',
+            'moos_native_x86_64_defconfig',
+            'moos_native_installer_x86_64_defconfig',
+        ]:
+            config = (ROOT / 'configs' / name).read_text()
+            self.assertIn('BR2_DOWNLOAD_FORCE_CHECK_HASHES=y', config, name)
 
 
 if __name__ == '__main__':

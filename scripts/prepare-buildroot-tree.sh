@@ -12,8 +12,11 @@ patch_dir=$2
 
 # Buildroot's hash-verified source cache lives in dl/. It is the only allowed
 # untracked source-tree content; out-of-tree build output lives elsewhere.
-if [ -n "$(git -C "$buildroot_dir" ls-files --others --exclude-standard -- . ':(exclude)dl/**')$(git -C "$buildroot_dir" ls-files --others --ignored --exclude-standard -- . ':(exclude)dl/**')" ]; then
-    echo 'error: refusing untracked Buildroot inputs' >&2
+untracked_inputs=$(git -C "$buildroot_dir" ls-files --others --exclude-standard -- . ':(exclude)dl/**')
+ignored_inputs=$(git -C "$buildroot_dir" ls-files --others --ignored --exclude-standard -- . ':(exclude)dl/**')
+if [ -n "$untracked_inputs$ignored_inputs" ]; then
+    echo 'error: refusing untracked Buildroot inputs:' >&2
+    printf '%s\n%s\n' "$untracked_inputs" "$ignored_inputs" >&2
     exit 1
 fi
 
