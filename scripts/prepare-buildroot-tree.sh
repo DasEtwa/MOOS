@@ -10,6 +10,11 @@ fi
 buildroot_dir=$1
 patch_dir=$2
 
+if [ -n "$(git -C "$buildroot_dir" ls-files --others --exclude-standard)$(git -C "$buildroot_dir" ls-files --others --ignored --exclude-standard)" ]; then
+    echo 'error: refusing untracked Buildroot inputs' >&2
+    exit 1
+fi
+
 git -C "$buildroot_dir" diff --cached --quiet HEAD -- || {
     echo 'error: refusing staged Buildroot changes' >&2
     exit 1

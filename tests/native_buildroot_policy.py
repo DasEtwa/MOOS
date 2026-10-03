@@ -24,7 +24,8 @@ class BuildrootPolicy(unittest.TestCase):
             run('git', '-C', str(repo), 'config', 'user.name', 'MOOS test')
             (repo / 'tracked').write_text('base\n')
             (repo / 'unrelated').write_text('base\n')
-            run('git', '-C', str(repo), 'add', 'tracked', 'unrelated')
+            (repo / '.gitignore').write_text('ignored-input\n')
+            run('git', '-C', str(repo), 'add', 'tracked', 'unrelated', '.gitignore')
             run('git', '-C', str(repo), 'commit', '-qm', 'base')
             (repo / 'tracked').write_text('expected\n')
             patch = run('git', '-C', str(repo), 'diff', '--', 'tracked').stdout
@@ -34,6 +35,18 @@ class BuildrootPolicy(unittest.TestCase):
             run('sh', str(PREPARE), str(repo), str(patches))
             self.assertEqual((repo / 'tracked').read_text(), 'expected\n')
             run('sh', str(PREPARE), str(repo), str(patches))
+
+            (repo / 'untracked').write_text('attacker-controlled\n')
+            rejected = run('sh', str(PREPARE), str(repo), str(patches), check=False)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn('untracked Buildroot inputs', rejected.stderr)
+            (repo / 'untracked').unlink()
+
+            (repo / 'ignored-input').write_text('attacker-controlled\n')
+            rejected = run('sh', str(PREPARE), str(repo), str(patches), check=False)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn('untracked Buildroot inputs', rejected.stderr)
+            (repo / 'ignored-input').unlink()
 
             (repo / 'unrelated').write_text('attacker-controlled\n')
             rejected = run('sh', str(PREPARE), str(repo), str(patches), check=False)
