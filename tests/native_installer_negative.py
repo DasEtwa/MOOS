@@ -50,6 +50,7 @@ def preserve_fault(source,fault,image):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source',type=Path,default=ROOT/'output/native-installer/acceptance/bios/a.img')
+    parser.add_argument('--qemu',type=Path)
     args=parser.parse_args()
     media=ROOT/'output/native-installer/images/moos-native-installer-x86_64.img'
     before=native_boot.digest(media)
@@ -62,7 +63,9 @@ def main():
         parts=native_disk.read_gpt(damaged,media=True)
         subprocess.run([str(ROOT/'output/native-installer/host/bin/mcopy'),'-o','-i',str(damaged)+'@@'+str(parts[1].offset),str(boot),'::/payload/boot.img'],check=True,timeout=15)
         backing={p:native_boot.digest(p) for p in [damaged,a,workspace/'b.img']}
-        session=InstallerSession(['--workspace',str(workspace),'--image',str(damaged)])
+        runner_args=['--workspace',str(workspace),'--image',str(damaged)]
+        if args.qemu:runner_args += ['--qemu',str(args.qemu)]
+        session=InstallerSession(runner_args)
         try:
             output=session.read_until('payload integrity mismatch',120)
             assert 'INSTALL_STATE=BLOCKED' in output and 'INSTALL_STATE=COMPLETE' not in output
@@ -75,7 +78,9 @@ def main():
             workspace=Path(directory);a,serial=prepare(workspace,args.source)
             preserve_fault(args.source,fault,a)
             backing={p:native_boot.digest(p) for p in [a,workspace/'b.img']}
-            session=InstallerSession(['--workspace',str(workspace),'--image',str(media)])
+            runner_args=['--workspace',str(workspace),'--image',str(media)]
+            if args.qemu:runner_args += ['--qemu',str(args.qemu)]
+            session=InstallerSession(runner_args)
             try:
                 session.read_until('installer> ',120)
                 output=session.command('plan '+serial+' preserve')
@@ -88,7 +93,9 @@ def main():
     with tempfile.TemporaryDirectory(prefix='moos-native-installer-',dir='/tmp') as directory:
         workspace=Path(directory);a,serial=prepare(workspace)
         b_before=native_boot.digest(workspace/'b.img')
-        session=InstallerSession(['--workspace',str(workspace),'--image',str(media)])
+        runner_args=['--workspace',str(workspace),'--image',str(media)]
+        if args.qemu:runner_args += ['--qemu',str(args.qemu)]
+        session=InstallerSession(runner_args)
         try:
             session.read_until('installer> ',120)
             output=session.command('plan '+serial+' fresh')

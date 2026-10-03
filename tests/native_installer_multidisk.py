@@ -26,6 +26,7 @@ def main():
     parser.add_argument('--boot',choices=['bios','uefi'],default='bios')
     parser.add_argument('--uefi-code',type=Path)
     parser.add_argument('--uefi-vars',type=Path)
+    parser.add_argument('--qemu',type=Path,default=ROOT/'output/host/bin/qemu-system-x86_64')
     args=parser.parse_args()
     results=ROOT/'output/native-installer/acceptance'
     images=[results/'bios/a.img',results/'uefi/a.img']
@@ -43,7 +44,6 @@ def main():
             (workspace/(name+'.img')).chmod(0o600)
             (workspace/(name+'.serial')).write_text('MOOS-N3-TARGET-'+uuid.uuid4().hex[:5]+'\n')
         args.workspace=workspace;args.image=ROOT/'output/native-installer/images/moos-native-installer-x86_64.img'
-        args.qemu=ROOT/'output/host/bin/qemu-system-x86_64'
         argv=runner.command(args)
         # Reuse strict private-file sandbox policy; omit source device and boot B.
         source_drive='file=/moos/installer.img,if=none,id=source,format=raw,readonly=on'

@@ -1,0 +1,47 @@
+name: Native security policy
+
+on:
+  push:
+    branches: ['**']
+    paths: ['native/**', 'configs/**', 'scripts/**', 'system/native/**', 'system/native-installer/**', 'patches/**', 'tests/native_*', 'rules.md', 'docs/native/**', '.github/workflows/**']
+  pull_request:
+    paths: ['native/**', 'configs/**', 'scripts/**', 'system/native/**', 'system/native-installer/**', 'patches/**', 'tests/native_*', 'rules.md', 'docs/native/**', '.github/workflows/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install policy tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y fdisk shellcheck
+      - name: Rust format, lint, and tests
+        run: |
+          rustup toolchain install 1.97.1 --profile minimal --component clippy --component rustfmt
+          rustup default 1.97.1
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+          cargo test --workspace --all-targets --locked
+      - name: Native and workflow policy tests
+        run: |
+          python3 tests/native_config.py
+          python3 tests/native_layout.py
+          python3 tests/native_installer_policy.py
+          python3 tests/native_buildroot_policy.py
+          python3 tests/native_boot_identity_policy.py
+          python3 tests/workflow_security.py
+          python3 tests/docs_links.py
+      - name: Shell and repository integrity checks
+        run: |
+          sh -n scripts/build.sh scripts/prepare-buildroot-tree.sh scripts/native-installer-post-build.sh scripts/native-installer-post-image.sh
+          shellcheck --severity=warning --exclude=SC1007 scripts/build.sh scripts/prepare-buildroot-tree.sh scripts/native-installer-post-build.sh scripts/native-installer-post-image.sh
+          git diff --check
+          test -z "$(git ls-files | grep -Ei '(^|/)(id_rsa|id_ed25519|.*\.p12|.*\.pfx|.*\.key)$' || true)"

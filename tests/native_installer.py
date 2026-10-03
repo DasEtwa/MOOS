@@ -68,8 +68,10 @@ def main():
     parser.add_argument('--uefi-code',type=Path)
     parser.add_argument('--uefi-vars',type=Path)
     parser.add_argument('--image',type=Path,default=ROOT/'output/native-installer/images/moos-native-installer-x86_64.img')
+    parser.add_argument('--qemu',type=Path)
     args=parser.parse_args()
     firmware=['--boot',args.boot]
+    if args.qemu: firmware += ['--qemu',str(args.qemu)]
     if args.boot=='uefi':
         if not args.uefi_code or not args.uefi_vars: parser.error('UEFI firmware required')
         firmware += ['--uefi-code',str(args.uefi_code),'--uefi-vars',str(args.uefi_vars)]

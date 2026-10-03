@@ -1,0 +1,37 @@
+name: Native installer adversarial
+
+on:
+  pull_request:
+    paths: ['native/installer/**', 'configs/**', 'scripts/native-*', 'scripts/run-native-*', 'system/native/**', 'system/native-installer/**', 'patches/**', 'tests/native_*', '.github/workflows/native-installer-adversarial.yml']
+  schedule:
+    - cron: '23 3 * * 3'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  negative:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install build and virtual-machine tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y build-essential bc bison bubblewrap cpio file flex git libelf-dev libncurses-dev python3 qemu-system-x86 rsync unzip wget
+          rustup toolchain install 1.97.1 --profile minimal
+          rustup default 1.97.1
+      - name: Build exact installer inputs
+        run: ./scripts/build.sh --target native-installer --jobs 4
+      - name: Establish a disposable installed target
+        run: python3 tests/native_installer.py --boot bios --qemu /usr/bin/qemu-system-x86_64
+      - name: Run destructive and malformed-state negatives
+        run: python3 tests/native_installer_negative.py --qemu /usr/bin/qemu-system-x86_64
+      - name: Re-run pure contract and host-file guards
+        run: |
+          cargo test -p moos-native-installer --all-targets --locked
+          python3 tests/native_installer_policy.py
+          python3 tests/native_buildroot_policy.py
