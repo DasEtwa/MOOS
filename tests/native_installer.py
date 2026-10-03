@@ -16,6 +16,7 @@ import native_disk
 from native_test_disk import DisposableDisk
 import native_persistence
 import qemu_smoke
+from native_safe_output import ensure_directory, safe_copy_file, safe_write_text
 
 ROOT=native_boot.ROOT
 RUNNER=ROOT/'scripts/run-native-installer-qemu.py'
@@ -166,12 +167,14 @@ def main():
                 qemu_smoke.require('MOOS_N2_TEST_MARKER=native-n3-preserve-marker',output,'preserved marker')
             # Retain acceptance logs/images as generated artifacts only.
             result=ROOT/'output/native-installer/acceptance'/args.boot
-            result.mkdir(parents=True,exist_ok=True)
-            for path in [a,workspace/'install-console.log',workspace/'preserve-console.log']:
-                shutil.copyfile(path,result/path.name)
+            ensure_directory(result)
+            safe_copy_file(a,result/'a.img',max_bytes=512*native_disk.MIB,
+                           expected_size=512*native_disk.MIB)
+            for path in [workspace/'install-console.log',workspace/'preserve-console.log']:
+                safe_copy_file(path,result/path.name,max_bytes=4*1024*1024)
             with a.open('rb') as stream:
                 stream.seek(512+56);disk_guid=str(uuid.UUID(bytes_le=stream.read(16)))
-            (result/'identities.json').write_text(json.dumps(dict(disk_guid=disk_guid,installation_id=identity,partitions=[str(p.identity) for p in parts]),indent=2)+'\n')
+            safe_write_text(result/'identities.json',json.dumps(dict(disk_guid=disk_guid,installation_id=identity,partitions=[str(p.identity) for p in parts]),indent=2)+'\n',max_bytes=8192)
         assert all(native_boot.digest(p)==d for p,d in backing.items())
         print(f'N3 {args.boot}: PASS installer -> fresh installed boot; source/unrelated unchanged; stale plan rejected; DATA reinstall preserved')
         return 0

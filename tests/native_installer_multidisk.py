@@ -12,9 +12,11 @@ import tempfile
 import uuid
 
 import native_boot
+import native_disk
 import native_persistence
 from native_test_disk import DisposableDisk
 import qemu_smoke
+from native_safe_output import ensure_directory, safe_digest, safe_read_text, safe_write_text
 
 ROOT=native_boot.ROOT
 spec=importlib.util.spec_from_file_location('n3_runner',ROOT/'scripts/run-native-installer-qemu.py')
@@ -29,12 +31,13 @@ def main():
     parser.add_argument('--qemu',type=Path,default=ROOT/'output/host/bin/qemu-system-x86_64')
     args=parser.parse_args()
     results=ROOT/'output/native-installer/acceptance'
+    ensure_directory(results)
     images=[results/'bios/a.img',results/'uefi/a.img']
-    identities=[json.loads((results/mode/'identities.json').read_text()) for mode in ['bios','uefi']]
+    identities=[json.loads(safe_read_text(results/mode/'identities.json',max_bytes=8192)) for mode in ['bios','uefi']]
     for key in ['disk_guid','installation_id']:
         assert identities[0][key]!=identities[1][key]
     assert all(a!=b for a,b in zip(identities[0]['partitions'],identities[1]['partitions']))
-    originals={p:native_boot.digest(p) for p in images}
+    originals={p:safe_digest(p,max_bytes=512*native_disk.MIB,expected_size=512*native_disk.MIB) for p in images}
     with tempfile.TemporaryDirectory(prefix='moos-native-installer-',dir='/tmp') as directory:
         workspace=Path(directory)
         for name,image in zip(['a','b'],images):
@@ -66,10 +69,10 @@ def main():
             output=session.read_until('reboot: Power down',120)
             assert native_persistence.ready(output)==identities[1]['installation_id'], 'firmware-selected second disk was not used'
             assert session.wait_for_exit(15)==0
-            (results/(args.boot+'-multidisk.log')).write_text(session.output)
+            safe_write_text(results/(args.boot+'-multidisk.log'),session.output)
         finally:session.close()
         assert all(native_boot.digest(p)==d for p,d in before.items())
-    assert all(native_boot.digest(p)==d for p,d in originals.items())
+    assert all(safe_digest(p,max_bytes=512*native_disk.MIB,expected_size=512*native_disk.MIB)==d for p,d in originals.items())
     print(f'N3 {args.boot}: PASS two installs unique; firmware-selected second disk booted its own SYSTEM_A/DATA; readonly backings unchanged')
 
 

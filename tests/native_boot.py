@@ -14,6 +14,7 @@ from pathlib import Path
 
 import qemu_smoke
 import native_disk
+from native_safe_output import safe_write_text
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("release_validator", ROOT / "scripts/validate-release-rootfs.py")
@@ -131,7 +132,7 @@ def main():
         if session:
             session.close()
             if args.log:
-                args.log.write_text(session.output)
+                safe_write_text(args.log,session.output)
 
 
 if __name__ == "__main__":

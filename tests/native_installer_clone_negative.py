@@ -5,12 +5,13 @@ import importlib.util
 import os
 from pathlib import Path
 import pty
-import shutil
 import tempfile
 import uuid
 
 import native_boot
+import native_disk
 import qemu_smoke
+from native_safe_output import safe_copy_file, safe_digest
 
 ROOT = native_boot.ROOT
 spec = importlib.util.spec_from_file_location('n3_runner', ROOT / 'scripts/run-native-installer-qemu.py')
@@ -27,11 +28,12 @@ def main():
     installed = ROOT / 'output/native-installer/acceptance' / args.boot / 'a.img'
     if not installed.is_file():
         raise SystemExit('run native_installer.py for this boot mode first')
-    original = native_boot.digest(installed)
+    original = safe_digest(installed,max_bytes=512*native_disk.MIB,expected_size=512*native_disk.MIB)
     with tempfile.TemporaryDirectory(prefix='moos-native-installer-', dir='/tmp') as name:
         workspace = Path(name)
         for disk in ['a', 'b']:
-            shutil.copyfile(installed, workspace / f'{disk}.img')
+            safe_copy_file(installed,workspace/f'{disk}.img',max_bytes=512*native_disk.MIB,
+                           expected_size=512*native_disk.MIB)
             (workspace / f'{disk}.img').chmod(0o600)
             (workspace / f'{disk}.serial').write_text('MOOS-N3-TARGET-' + uuid.uuid4().hex[:5] + '\n')
         args.workspace = workspace
@@ -63,7 +65,7 @@ def main():
         finally:
             session.close()
         assert all(native_boot.digest(path) == digest for path, digest in before.items())
-    assert native_boot.digest(installed) == original
+    assert safe_digest(installed,max_bytes=512*native_disk.MIB,expected_size=512*native_disk.MIB) == original
     print(f'N3 {args.boot}: PASS duplicate installed identities failed before root/DATA acceptance')
 
 
