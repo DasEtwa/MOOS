@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Executable installer Host input guards and source/build configuration policy."""
+import hashlib
 import importlib.util
 import os
 from pathlib import Path
@@ -7,10 +8,13 @@ import tempfile
 import unittest
 
 import native_safe_output
+import native_boot
 
 ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('installer_runner',ROOT/'scripts/run-native-installer-qemu.py')
 runner=importlib.util.module_from_spec(spec);spec.loader.exec_module(runner)
+payload_spec=importlib.util.spec_from_file_location('installer_payload',ROOT/'scripts/native-installer-payload.py')
+payload=importlib.util.module_from_spec(payload_spec);payload_spec.loader.exec_module(payload)
 
 
 class InstallerPolicy(unittest.TestCase):
@@ -148,6 +152,23 @@ class InstallerPolicy(unittest.TestCase):
                          (ROOT/'tests/native_installer.py').read_text())
         self.assertNotIn('write_text(session.output)',
                          (ROOT/'tests/native_installer_multidisk.py').read_text())
+
+    def test_streaming_hashes_do_not_require_python_311_file_digest(self):
+        original = getattr(hashlib, 'file_digest', None)
+        if original is not None:
+            delattr(hashlib, 'file_digest')
+        try:
+            with tempfile.TemporaryDirectory(prefix='moos-stream-hash-') as temporary:
+                path=Path(temporary)/'payload.bin'
+                content=bytes(range(256))*(1024*4 + 17)
+                path.write_bytes(content)
+                expected=hashlib.sha256(content).hexdigest()
+                self.assertEqual(native_boot.digest(path), expected)
+                with path.open('rb') as stream:
+                    self.assertEqual(payload.digest_stream(stream), expected)
+        finally:
+            if original is not None:
+                hashlib.file_digest=original
 
 
 if __name__=='__main__':unittest.main()

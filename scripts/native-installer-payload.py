@@ -17,6 +17,13 @@ def regular(path):
     return info
 
 
+def digest_stream(stream):
+    digest = hashlib.sha256()
+    for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', type=Path, required=True)
@@ -42,7 +49,7 @@ def main():
             regular(target)
         shutil.copyfile(source, target)
         with target.open('rb') as stream:
-            digest = hashlib.file_digest(stream,'sha256').hexdigest()
+            digest = digest_stream(stream)
         entries.append(dict(role=role,file=name,size=info.st_size,sha256=digest))
     manifest = args.output / 'manifest.json'
     if manifest.exists() or manifest.is_symlink():
