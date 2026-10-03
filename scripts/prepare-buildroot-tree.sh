@@ -10,7 +10,9 @@ fi
 buildroot_dir=$1
 patch_dir=$2
 
-if [ -n "$(git -C "$buildroot_dir" ls-files --others --exclude-standard)$(git -C "$buildroot_dir" ls-files --others --ignored --exclude-standard)" ]; then
+# Buildroot's hash-verified source cache lives in dl/. It is the only allowed
+# untracked source-tree content; out-of-tree build output lives elsewhere.
+if [ -n "$(git -C "$buildroot_dir" ls-files --others --exclude-standard -- . ':(exclude)dl/**')$(git -C "$buildroot_dir" ls-files --others --ignored --exclude-standard -- . ':(exclude)dl/**')" ]; then
     echo 'error: refusing untracked Buildroot inputs' >&2
     exit 1
 fi

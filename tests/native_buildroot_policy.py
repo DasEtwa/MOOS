@@ -24,7 +24,7 @@ class BuildrootPolicy(unittest.TestCase):
             run('git', '-C', str(repo), 'config', 'user.name', 'MOOS test')
             (repo / 'tracked').write_text('base\n')
             (repo / 'unrelated').write_text('base\n')
-            (repo / '.gitignore').write_text('ignored-input\n')
+            (repo / '.gitignore').write_text('ignored-input\ndl/\n')
             run('git', '-C', str(repo), 'add', 'tracked', 'unrelated', '.gitignore')
             run('git', '-C', str(repo), 'commit', '-qm', 'base')
             (repo / 'tracked').write_text('expected\n')
@@ -47,6 +47,10 @@ class BuildrootPolicy(unittest.TestCase):
             self.assertNotEqual(rejected.returncode, 0)
             self.assertIn('untracked Buildroot inputs', rejected.stderr)
             (repo / 'ignored-input').unlink()
+
+            (repo / 'dl').mkdir()
+            (repo / 'dl/cache.tar').write_text('hash-verified cache fixture\n')
+            run('sh', str(PREPARE), str(repo), str(patches))
 
             (repo / 'unrelated').write_text('attacker-controlled\n')
             rejected = run('sh', str(PREPARE), str(repo), str(patches), check=False)
