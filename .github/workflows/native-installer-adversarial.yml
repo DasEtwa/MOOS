@@ -12,7 +12,9 @@ permissions:
 
 jobs:
   negative:
-    runs-on: ubuntu-24.04
+    # Ubuntu 24.04 hosted runners deny Bubblewrap's required RTM_NEWADDR.
+    # Revisit before ubuntu-22.04 retirement on 2027-04-17; never drop isolation.
+    runs-on: ubuntu-22.04
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -24,6 +26,8 @@ jobs:
           sudo apt-get install --no-install-recommends -y build-essential bc bison bubblewrap cpio file flex git libelf-dev libncurses-dev python3 qemu-system-x86 rsync unzip util-linux wget
           rustup toolchain install 1.97.1 --profile minimal
           rustup default 1.97.1
+      - name: Require offline QEMU sandbox support before building
+        run: bwrap --unshare-all --die-with-parent --ro-bind / / /usr/bin/true
       - name: Build exact installer inputs
         run: ./scripts/build.sh --target native-installer --jobs 4
       - name: Establish a disposable installed target
