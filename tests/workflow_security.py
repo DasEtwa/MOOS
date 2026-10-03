@@ -35,10 +35,12 @@ class WorkflowSecurity(unittest.TestCase):
             'native-installer-e2e.yml',
             'native-installer-adversarial.yml',
             'native-cross-host.yml',
+            'native-reproducibility.yml',
         ]:
             text = (ROOT / '.github/workflows' / name).read_text()
             self.assertIn("'scripts/build.sh'", text, name)
             self.assertIn("'scripts/prepare-buildroot-tree.sh'", text, name)
+            self.assertIn("'scripts/clean-buildroot-git-cache.sh'", text, name)
 
     def test_both_base_installs_exist_before_multidisk_acceptance(self):
         text = (ROOT / '.github/workflows/native-installer-e2e.yml').read_text()

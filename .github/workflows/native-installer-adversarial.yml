@@ -2,7 +2,7 @@ name: Native installer adversarial
 
 on:
   pull_request:
-    paths: ['native/installer/**', 'configs/**', 'scripts/build.sh', 'scripts/prepare-buildroot-tree.sh', 'scripts/native-*', 'scripts/run-native-*', 'system/native/**', 'system/native-installer/**', 'patches/**', 'tests/native_*', '.github/workflows/native-installer-adversarial.yml']
+    paths: ['native/installer/**', 'configs/**', 'scripts/build.sh', 'scripts/prepare-buildroot-tree.sh', 'scripts/clean-buildroot-git-cache.sh', 'scripts/native-*', 'scripts/run-native-*', 'system/native/**', 'system/native-installer/**', 'patches/**', 'tests/native_*', '.github/workflows/native-installer-adversarial.yml']
   schedule:
     - cron: '23 3 * * 3'
   workflow_dispatch:
