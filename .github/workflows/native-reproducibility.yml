@@ -1,0 +1,57 @@
+name: Native reproducibility
+
+on:
+  pull_request:
+    paths: ['configs/**', 'scripts/build.sh', 'scripts/prepare-buildroot-tree.sh', 'scripts/clean-buildroot-git-cache.sh', 'scripts/native-*', 'system/native/**', 'system/native-installer/**', 'patches/**', '.github/workflows/native-reproducibility.yml']
+  schedule:
+    - cron: '41 4 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clean-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        build: [1, 2]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install clean-build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y build-essential bc bison cpio file flex git libelf-dev libncurses-dev python3 rsync unzip util-linux wget
+          rustup toolchain install 1.97.1 --profile minimal
+          rustup default 1.97.1
+      - name: Build in a fresh runner
+        run: ./scripts/build.sh --target native-installer --jobs 4
+      - name: Record reproducible artifact hashes
+        run: |
+          sha256sum \
+            output/native/images/moos-native-x86_64.img \
+            output/native-installer/images/moos-native-installer-x86_64.img \
+            output/native-installer/images/rootfs.cpio.gz \
+            output/native-installer/images/payload/manifest.json > native-hashes.txt
+          cat native-hashes.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: native-hashes-${{ matrix.build }}
+          path: native-hashes.txt
+          if-no-files-found: error
+          retention-days: 7
+  compare:
+    needs: clean-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: native-hashes-*
+          path: hashes
+      - name: Require byte-identical independent outputs
+        run: diff -u hashes/native-hashes-1/native-hashes.txt hashes/native-hashes-2/native-hashes.txt

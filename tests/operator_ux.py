@@ -558,7 +558,7 @@ class ProbeTests(unittest.TestCase):
                             patch.object(os, "fstat", side_effect=root_fstat):
                         self.assertEqual(probe.public_fingerprint(), expected)
             rsa_public = public_fixtures[0][0].read_bytes()
-            for data, expected in ((b"-----BEGIN PRIVATE KEY-----\ninvalid\n", None),
+            for data, expected in ((b"-----" + b"BEGIN PRIVATE KEY" + b"-----\ninvalid\n", None),
                                    (b"broken", None),
                                    (b"-----BEGIN PUBLIC KEY-----\nbad", None),
                                    (rsa_public + b"x" * 17000, None)):

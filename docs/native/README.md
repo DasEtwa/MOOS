@@ -263,7 +263,8 @@ N0/N1, the N2 disk/state foundation and the experimental N3 installer are
 implemented on the stacked work branches, not merged production truth.
 [STEPS](../../STEPS.md) and [N2 acceptance](acceptance/N2.md) distinguish observed results from pending gates; later rows
 are design direction, not permission to skip their prerequisites. N3 evidence
-is recorded separately in [N3 acceptance](acceptance/N3.md).
+is recorded separately in [N3 acceptance](acceptance/N3.md). The independent
+installer audit is tracked in [N3 security review](acceptance/N3-security-review.md).
 
 ## Persistent systems and A/B direction
 

@@ -1,0 +1,44 @@
+From: MOOS maintainers <moos@example.invalid>
+Subject: [PATCH] block: refuse ambiguous early PARTUUID lookup
+
+The early root lookup currently returns the first matching PARTUUID. A
+byte-for-byte disk clone therefore lets enumeration order choose a different
+SYSTEM_A than the firmware-selected disk. Fail closed when another matching
+partition exists so cloned installed disks cannot silently select either root.
+
+This affects only early PARTUUID lookup. Unique identifiers keep their existing
+behavior; recovery media remains responsible for deliberately resolving clones.
+---
+ block/early-lookup.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/block/early-lookup.c b/block/early-lookup.c
+--- a/block/early-lookup.c
++++ b/block/early-lookup.c
+@@ -45,6 +45,7 @@ static int __init devt_from_partuuid(const char *uuid_str, dev_t *devt)
+ {
+ 	struct uuidcmp cmp;
+ 	struct device *dev = NULL;
++	struct device *duplicate;
+ 	int offset = 0;
+ 	char *slash;
+ 
+@@ -71,6 +72,16 @@ static int __init devt_from_partuuid(const char *uuid_str, dev_t *devt)
+ 	if (!dev)
+ 		return -ENODEV;
+ 
++	duplicate = class_find_device(&block_class, dev, &cmp,
++				      &match_dev_by_uuid);
++	if (duplicate) {
++		pr_err("VFS: duplicate PARTUUID=%.*s; refusing ambiguous root.\n",
++		       cmp.len, cmp.uuid);
++		put_device(duplicate);
++		put_device(dev);
++		return -ENOTUNIQ;
++	}
++
+ 	if (offset) {
+ 		/*
+ 		 * Attempt to find the requested partition by adding an offset
+-- 
+2.51.0

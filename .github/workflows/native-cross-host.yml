@@ -1,0 +1,39 @@
+name: Native cross host
+
+on:
+  pull_request:
+    paths: ['Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'native/installer/**', 'scripts/build.sh', 'scripts/prepare-buildroot-tree.sh', 'scripts/clean-buildroot-git-cache.sh', 'scripts/run-native-*', 'tests/native_*', '.github/workflows/native-cross-host.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-portability:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Record Host architecture
+        run: |
+          uname -a
+          printf 'This job tests Host tooling only; MOOS Native remains an x86_64 guest target.\n'
+      - name: Install policy test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y util-linux
+      - name: Test Host-independent installer logic
+        run: |
+          rustup toolchain install 1.97.1 --profile minimal --component clippy --component rustfmt
+          rustup default 1.97.1
+          cargo test -p moos-native-installer --all-targets --locked
+          cargo clippy -p moos-native-installer --all-targets --locked -- -D warnings
+          python3 tests/native_installer_policy.py
+          python3 tests/native_buildroot_policy.py
+          python3 tests/native_boot_identity_policy.py

@@ -47,6 +47,15 @@ fn property(path: &Path) -> String {
         .take(128)
         .collect()
 }
+
+fn bounded_entries(path: &Path, limit: usize, message: &str) -> Result<Vec<PathBuf>> {
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(path)? {
+        require(entries.len() < limit, message)?;
+        entries.push(entry?.path());
+    }
+    Ok(entries)
+}
 pub fn random_id() -> Result<String> {
     let mut bytes = [0_u8; 16];
     // getrandom uses the Linux getrandom syscall: no pre-CRNG urandom fallback.
@@ -391,11 +400,20 @@ impl Disk {
         Ok(hash(&serde_json::to_vec(self)?))
     }
 }
+fn require_unchanged_disk(actual: &Disk, expected: &Disk) -> Result<()> {
+    require(
+        actual == expected,
+        "disk generation or layout changed during install",
+    )
+}
 pub fn discover(source: &str) -> Result<Vec<Disk>> {
     let mut disks = Vec::new();
     let qemu = property(Path::new("/sys/class/dmi/id/sys_vendor")) == "QEMU";
-    for entry in fs::read_dir("/sys/class/block")?.take(65) {
-        let path = entry?.path();
+    for path in bounded_entries(
+        Path::new("/sys/class/block"),
+        256,
+        "too many sysfs block entries",
+    )? {
         if path.join("partition").exists() {
             continue;
         }
@@ -434,8 +452,7 @@ pub fn discover(source: &str) -> Result<Vec<Disk>> {
             && (MIN_TARGET..=64 * 1024 * 1024 * 1024).contains(&size)
             && size.is_multiple_of(MIB);
         let mut partition_roles = Vec::new();
-        for partition in fs::read_dir(&sys_device)?.take(65) {
-            let part = partition?.path();
+        for part in bounded_entries(Path::new(&sys_device), 256, "too many sysfs device entries")? {
             if part.join("partition").exists() {
                 if eligible {
                     require_unmounted(&property(&part.join("dev")))?;
@@ -517,6 +534,20 @@ pub struct Payload {
     pub version: String,
     pub entries: Vec<PayloadEntry>,
 }
+
+fn verify_payload_file(path: &Path, entry: &PayloadEntry, message: &str) -> Result<()> {
+    let info = fs::symlink_metadata(path)?;
+    require(
+        info.is_file()
+            && info.nlink() == 1
+            && !info.file_type().is_symlink()
+            && info.len() == entry.size,
+        message,
+    )?;
+    let file = File::open(path)?;
+    require(range_hash(&file, 0, entry.size)? == entry.sha256, message)
+}
+
 impl Payload {
     pub fn verify(directory: &Path) -> Result<Self> {
         let value: Self = serde_json::from_str(&text(directory.join("manifest.json"), 8192)?)?;
@@ -548,19 +579,7 @@ impl Payload {
                 "invalid payload role/size/path",
             )?;
             let path = directory.join(name);
-            let info = fs::symlink_metadata(&path)?;
-            require(
-                info.is_file()
-                    && info.nlink() == 1
-                    && !info.file_type().is_symlink()
-                    && info.len() == entry.size,
-                "invalid payload member",
-            )?;
-            let file = File::open(&path)?;
-            require(
-                range_hash(&file, 0, entry.size)? == entry.sha256,
-                "payload integrity mismatch",
-            )?;
+            verify_payload_file(&path, entry, "payload integrity mismatch")?;
         }
         Ok(value)
     }
@@ -639,8 +658,11 @@ impl Installer {
             "unexpected source identity",
         )?;
         let mut sources = Vec::new();
-        for entry in fs::read_dir("/sys/class/block")?.take(65) {
-            let path = entry?.path();
+        for path in bounded_entries(
+            Path::new("/sys/class/block"),
+            256,
+            "too many sysfs block entries",
+        )? {
             if text(path.join("uevent"), 2048)?
                 .lines()
                 .any(|s| s == format!("PARTUUID={uuid}"))
@@ -762,10 +784,27 @@ impl Installer {
         Ok(result)
     }
     fn guard(&self, target: &Disk) -> Result<()> {
-        let mut actual = self.select(&target.serial)?;
-        actual.layout_fingerprint = target.layout_fingerprint.clone();
-        actual.partition_roles = target.partition_roles.clone();
-        require(actual == *target, "disk generation changed during install")
+        require_unchanged_disk(&self.select(&target.serial)?, target)
+    }
+    fn snapshot_layout(&self, target: &Disk, expected: &Layout) -> Result<Disk> {
+        let actual = self.select(&target.serial)?;
+        let mut actual_identity = actual.clone();
+        actual_identity.layout_fingerprint = target.layout_fingerprint.clone();
+        actual_identity.partition_roles = target.partition_roles.clone();
+        require(
+            actual_identity == *target,
+            "disk generation changed while recording intended layout",
+        )?;
+        let disk = pinned_device(&actual.path(), false)?;
+        require(
+            layout(&disk)? == *expected,
+            "disk layout changed while recording intended layout",
+        )?;
+        require(
+            self.select(&target.serial)? == actual,
+            "disk layout changed while recording intended layout",
+        )?;
+        Ok(actual)
     }
     fn state(&self, device: &File) -> Result<String> {
         let dev = alias(device);
@@ -942,6 +981,7 @@ impl Installer {
     }
     pub fn apply(&self, plan: &Plan, confirmation: &str) -> Result<()> {
         let target = self.select(&plan.target.serial)?;
+        let mut guarded_target = target.clone();
         let disk = pinned_device(&target.path(), true)?;
         plan.revalidate(
             &self.select(&plan.target.serial)?,
@@ -1005,13 +1045,16 @@ impl Installer {
                 "written GUID mismatch",
             )?;
         }
-        let parts = self.partitions(&target, &observed)?;
+        if plan.mode == Mode::Fresh {
+            guarded_target = self.snapshot_layout(&target, &plan.layout)?;
+        }
+        let parts = self.partitions(&guarded_target, &observed)?;
         phase("WRITING_SYSTEM");
-        self.guard(&target)?;
+        self.guard(&guarded_target)?;
         copy_payload(&self.payload_dir.join("rootfs.ext2"), &parts[2], 60 * MIB)?;
         zero(&parts[3], 60 * MIB)?;
         phase("WRITING_BOOT");
-        self.guard(&target)?;
+        self.guard(&guarded_target)?;
         copy_payload(
             &self.payload_dir.join("native-boot.vfat"),
             &parts[1],
@@ -1059,11 +1102,12 @@ impl Installer {
         })();
         tool("/bin/umount", &["/run/moos-installer/boot"], b"")?;
         boot_result?;
-        self.guard(&target)?;
-        let bios_hashes = self.embed_bios(plan, &disk)?;
+        self.guard(&guarded_target)?;
+        let bios_hashes = self.embed_bios(plan, &guarded_target, &disk)?;
+        guarded_target = self.snapshot_layout(&guarded_target, &plan.layout)?;
         if plan.mode == Mode::Fresh {
             phase("INITIALIZING_DATA");
-            self.guard(&target)?;
+            self.guard(&guarded_target)?;
             tool(
                 "/sbin/mkfs.ext4",
                 &[
@@ -1196,10 +1240,11 @@ impl Installer {
         tool("/bin/umount", &["/run/moos-installer/boot"], b"")?;
         verified?;
         Payload::verify(&self.payload_dir)?;
+        self.guard(&guarded_target)?;
         phase("COMPLETE");
         Ok(())
     }
-    fn embed_bios(&self, plan: &Plan, disk: &File) -> Result<[String; 2]> {
+    fn embed_bios(&self, plan: &Plan, guarded_target: &Disk, disk: &File) -> Result<[String; 2]> {
         // GRUB canonicalizes device maps. It therefore receives NO guest device:
         // embed normally on private sparse regular GPT staging, then copy only
         // protective MBR + BIOS_GRUB through the retained target descriptor.
@@ -1234,8 +1279,15 @@ impl Installer {
             &[staging_path.to_str().ok_or("stage path")?],
             script.as_bytes(),
         )?;
-        for name in ["boot.img", "grub.img"] {
-            fs::copy(self.payload_dir.join(name), directory.join(name))?;
+        for (index, name) in [(2, "boot.img"), (3, "grub.img")] {
+            let staged_path = directory.join(name);
+            fs::copy(self.payload_dir.join(name), &staged_path)?;
+            let entry = &plan.payload.entries[index];
+            verify_payload_file(
+                &staged_path,
+                entry,
+                "staged BIOS payload differs from planned manifest",
+            )?;
         }
         fs::write(
             directory.join("device.map"),
@@ -1252,7 +1304,7 @@ impl Installer {
             ],
             b"",
         )?;
-        self.guard(&plan.target)?;
+        self.guard(guarded_target)?;
         let hashes = [
             range_hash(&staging, 0, 512)?,
             range_hash(&staging, MIB, MIB)?,
@@ -1319,4 +1371,91 @@ pub fn phase(name: &str) {
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+
+    fn private_directory(name: &str) -> Result<PathBuf> {
+        let path = std::env::temp_dir().join(format!("moos-installer-{name}-{}", random_id()?));
+        fs::create_dir(&path)?;
+        Ok(path)
+    }
+
+    #[test]
+    fn bounded_directory_enumeration_rejects_overflow() -> Result<()> {
+        let directory = private_directory("entries")?;
+        for index in 0..3 {
+            File::create(directory.join(index.to_string()))?;
+        }
+        require(
+            bounded_entries(&directory, 3, "overflow")?.len() == 3,
+            "bounded enumeration lost entries",
+        )?;
+        require(
+            bounded_entries(&directory, 2, "overflow").is_err(),
+            "overflowing enumeration was silently truncated",
+        )?;
+        fs::remove_dir_all(directory)?;
+        Ok(())
+    }
+
+    #[test]
+    fn staged_bios_bytes_must_match_planned_digest() -> Result<()> {
+        let directory = private_directory("bios")?;
+        let path = directory.join("boot.img");
+        fs::write(&path, b"planned")?;
+        let entry = PayloadEntry {
+            role: "BIOS_BOOT".into(),
+            file: "boot.img".into(),
+            size: 7,
+            sha256: hash(b"planned"),
+        };
+        verify_payload_file(&path, &entry, "mismatch")?;
+        fs::write(&path, b"changed")?;
+        require(
+            verify_payload_file(&path, &entry, "mismatch").is_err(),
+            "changed BIOS bytes matched the planned manifest",
+        )?;
+        fs::remove_dir_all(directory)?;
+        Ok(())
+    }
+
+    #[test]
+    fn mutation_guard_rejects_layout_and_role_drift() -> Result<()> {
+        let expected = Disk {
+            kernel_name: "vdb".into(),
+            model: "test".into(),
+            serial: "MOOS-N3-TARGET-00001".into(),
+            wwn: String::new(),
+            size: 512 * MIB,
+            logical_sector: 512,
+            physical_sector: 512,
+            removable: false,
+            read_only: false,
+            source: false,
+            sys_device: "/sys/devices/test".into(),
+            device_number: "254:16".into(),
+            disk_sequence: 2,
+            layout_fingerprint: "planned".into(),
+            partition_roles: vec!["1:MOOS_BIOS:2048:2048".into()],
+            eligible: true,
+        };
+        require_unchanged_disk(&expected, &expected)?;
+        let mut changed = expected.clone();
+        changed.layout_fingerprint = "changed".into();
+        require(
+            require_unchanged_disk(&changed, &expected).is_err(),
+            "layout fingerprint drift passed the mutation guard",
+        )?;
+        changed = expected.clone();
+        changed
+            .partition_roles
+            .push("2:MOOS_BOOT:4096:32768".into());
+        require(
+            require_unchanged_disk(&changed, &expected).is_err(),
+            "partition role drift passed the mutation guard",
+        )
+    }
 }

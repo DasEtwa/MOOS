@@ -12,6 +12,7 @@ import native_boot
 import native_disk
 from native_installer import InstallerSession
 from native_test_disk import DisposableDisk
+from native_safe_output import ensure_directory, safe_write_text
 
 ROOT=native_boot.ROOT
 
@@ -50,10 +51,12 @@ def preserve_fault(source,fault,image):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source',type=Path,default=ROOT/'output/native-installer/acceptance/bios/a.img')
+    parser.add_argument('--qemu',type=Path)
     args=parser.parse_args()
     media=ROOT/'output/native-installer/images/moos-native-installer-x86_64.img'
     before=native_boot.digest(media)
-    logs=ROOT/'output/native-installer/acceptance/negative';logs.mkdir(parents=True,exist_ok=True)
+    logs=ROOT/'output/native-installer/acceptance/negative'
+    ensure_directory(logs)
     # A corrupted co-located payload must block startup, without touching targets.
     with tempfile.TemporaryDirectory(prefix='moos-native-installer-',dir='/tmp') as directory:
         workspace=Path(directory);a,serial=prepare(workspace)
@@ -62,12 +65,18 @@ def main():
         parts=native_disk.read_gpt(damaged,media=True)
         subprocess.run([str(ROOT/'output/native-installer/host/bin/mcopy'),'-o','-i',str(damaged)+'@@'+str(parts[1].offset),str(boot),'::/payload/boot.img'],check=True,timeout=15)
         backing={p:native_boot.digest(p) for p in [damaged,a,workspace/'b.img']}
-        session=InstallerSession(['--workspace',str(workspace),'--image',str(damaged)])
+        runner_args=['--workspace',str(workspace),'--image',str(damaged)]
+        if args.qemu:runner_args += ['--qemu',str(args.qemu)]
+        session=InstallerSession(runner_args)
         try:
             output=session.read_until('payload integrity mismatch',120)
             assert 'INSTALL_STATE=BLOCKED' in output and 'INSTALL_STATE=COMPLETE' not in output
             session.send('\x01x');assert session.wait_for_exit(10)==0
-        finally:(logs/'corrupt-payload.log').write_text(session.output);session.close()
+        finally:
+            try:
+                safe_write_text(logs/'corrupt-payload.log',session.output)
+            finally:
+                session.close()
         assert all(native_boot.digest(p)==d for p,d in backing.items())
     # Each rejected preserve plan leaves the complete target byte-identical.
     for fault in ['schema','identity','corrupt-data','duplicate-role','damaged-gpt']:
@@ -75,20 +84,28 @@ def main():
             workspace=Path(directory);a,serial=prepare(workspace,args.source)
             preserve_fault(args.source,fault,a)
             backing={p:native_boot.digest(p) for p in [a,workspace/'b.img']}
-            session=InstallerSession(['--workspace',str(workspace),'--image',str(media)])
+            runner_args=['--workspace',str(workspace),'--image',str(media)]
+            if args.qemu:runner_args += ['--qemu',str(args.qemu)]
+            session=InstallerSession(runner_args)
             try:
                 session.read_until('installer> ',120)
                 output=session.command('plan '+serial+' preserve')
                 assert 'INSTALL_STATE=FAILED' in output and 'PLAN=' not in output and 'COMPLETE' not in output,output
                 session.send('poweroff\n');session.read_until('reboot: Power down',20);assert session.wait_for_exit(10)==0
-            finally:(logs/(fault+'.log')).write_text(session.output);session.close()
+            finally:
+                try:
+                    safe_write_text(logs/(fault+'.log'),session.output)
+                finally:
+                    session.close()
             assert all(native_boot.digest(p)==d for p,d in backing.items())
         print('N3 preserve rejected without mutation:',fault,flush=True)
     # Interruption after destructive commit cannot report COMPLETE. No recovery claim.
     with tempfile.TemporaryDirectory(prefix='moos-native-installer-',dir='/tmp') as directory:
         workspace=Path(directory);a,serial=prepare(workspace)
         b_before=native_boot.digest(workspace/'b.img')
-        session=InstallerSession(['--workspace',str(workspace),'--image',str(media)])
+        runner_args=['--workspace',str(workspace),'--image',str(media)]
+        if args.qemu:runner_args += ['--qemu',str(args.qemu)]
+        session=InstallerSession(runner_args)
         try:
             session.read_until('installer> ',120)
             output=session.command('plan '+serial+' fresh')
@@ -97,7 +114,11 @@ def main():
             session.read_until('INSTALL_STATE=WRITING_SYSTEM',180)
             session.send('\x01x');assert session.wait_for_exit(10)==0
             assert 'INSTALL_STATE=COMPLETE' not in session.output
-        finally:(logs/'interrupted.log').write_text(session.output);session.close()
+        finally:
+            try:
+                safe_write_text(logs/'interrupted.log',session.output)
+            finally:
+                session.close()
         assert native_boot.digest(workspace/'b.img')==b_before
     assert native_boot.digest(media)==before
     print('N3 negative acceptance: PASS corrupt payload blocked; invalid preserve states unchanged; interrupted write never COMPLETE; source/unrelated intact')

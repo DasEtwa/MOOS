@@ -1,0 +1,44 @@
+name: Native installer end to end
+
+on:
+  pull_request:
+    paths: ['native/installer/**', 'configs/**', 'scripts/build.sh', 'scripts/prepare-buildroot-tree.sh', 'scripts/clean-buildroot-git-cache.sh', 'scripts/native-*', 'scripts/run-native-*', 'system/native/**', 'system/native-installer/**', 'patches/**', 'tests/native_*', '.github/workflows/native-installer-e2e.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bios-uefi:
+    # Ubuntu 24.04 hosted runners deny Bubblewrap's required RTM_NEWADDR.
+    # Revisit before ubuntu-22.04 retirement on 2027-04-17; never drop isolation.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install build and boot tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y build-essential bc bison bubblewrap cpio file flex git libelf-dev libncurses-dev ovmf python3 qemu-system-x86 rsync shellcheck unzip util-linux wget
+          rustup toolchain install 1.97.1 --profile minimal
+          rustup default 1.97.1
+      - name: Require offline QEMU sandbox support before building
+        run: bwrap --unshare-all --die-with-parent --ro-bind / / /usr/bin/true
+      - name: Build actual Native and installer media
+        run: ./scripts/build.sh --target native-installer --jobs 4
+      - name: Inspect generated media
+        run: python3 tests/native_installer_media.py
+      - name: Create and boot independent BIOS and UEFI installs
+        run: |
+          python3 tests/native_installer.py --boot bios --qemu /usr/bin/qemu-system-x86_64
+          python3 tests/native_installer.py --boot uefi --qemu /usr/bin/qemu-system-x86_64 --uefi-code /usr/share/OVMF/OVMF_CODE_4M.fd --uefi-vars /usr/share/OVMF/OVMF_VARS_4M.fd
+      - name: Exercise BIOS multidisk and clone rejection
+        run: |
+          python3 tests/native_installer_multidisk.py --boot bios --qemu /usr/bin/qemu-system-x86_64
+          python3 tests/native_installer_clone_negative.py --boot bios --qemu /usr/bin/qemu-system-x86_64
+      - name: Exercise UEFI multidisk and clone rejection
+        run: |
+          python3 tests/native_installer_multidisk.py --boot uefi --qemu /usr/bin/qemu-system-x86_64 --uefi-code /usr/share/OVMF/OVMF_CODE_4M.fd --uefi-vars /usr/share/OVMF/OVMF_VARS_4M.fd
+          python3 tests/native_installer_clone_negative.py --boot uefi --qemu /usr/bin/qemu-system-x86_64 --uefi-code /usr/share/OVMF/OVMF_CODE_4M.fd --uefi-vars /usr/share/OVMF/OVMF_VARS_4M.fd

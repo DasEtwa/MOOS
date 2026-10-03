@@ -1,0 +1,56 @@
+name: Native security policy
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install policy tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y fdisk shellcheck util-linux
+      - name: Rust format, lint, and tests
+        run: |
+          rustup toolchain install 1.97.1 --profile minimal --component clippy --component rustfmt
+          rustup default 1.97.1
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+          cargo test --workspace --all-targets --locked
+      - name: Native and workflow policy tests
+        run: |
+          python3 tests/native_config.py
+          python3 tests/native_layout.py
+          python3 tests/native_installer_policy.py
+          python3 tests/native_buildroot_policy.py
+          python3 tests/native_boot_identity_policy.py
+          python3 tests/workflow_security.py
+          python3 tests/docs_links.py
+      - name: Shell and repository integrity checks
+        env:
+          PUSH_BEFORE: ${{ github.event.before }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          sh -n scripts/build.sh scripts/prepare-buildroot-tree.sh scripts/clean-buildroot-git-cache.sh scripts/native-installer-post-build.sh scripts/native-installer-post-image.sh
+          shellcheck --severity=warning --exclude=SC1007 scripts/build.sh scripts/prepare-buildroot-tree.sh scripts/clean-buildroot-git-cache.sh scripts/native-installer-post-build.sh scripts/native-installer-post-image.sh
+          if [ -n "${GITHUB_BASE_REF:-}" ]; then
+            git diff --check "origin/$GITHUB_BASE_REF...HEAD"
+          elif [ -n "${PUSH_BEFORE:-}" ] && [ "$PUSH_BEFORE" != '0000000000000000000000000000000000000000' ]; then
+            git diff --check "$PUSH_BEFORE..$GITHUB_SHA"
+          elif [ -n "${PUSH_BEFORE:-}" ] && [ "$PUSH_BEFORE" = '0000000000000000000000000000000000000000' ] && [ "${GITHUB_REF_NAME:-}" != "${DEFAULT_BRANCH:-}" ] && git show-ref --verify --quiet "refs/remotes/origin/$DEFAULT_BRANCH"; then
+            git diff --check "origin/$DEFAULT_BRANCH...$GITHUB_SHA"
+          else
+            git diff --check "$(git hash-object -t tree /dev/null)..$GITHUB_SHA"
+          fi
+          test -z "$(git ls-files | grep -Ei '(^|/)(id_rsa|id_ed25519|.*\.p12|.*\.pfx|.*\.key)$' || true)"

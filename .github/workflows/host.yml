@@ -22,7 +22,7 @@ jobs:
       - name: Shell syntax and static checks
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y shellcheck
+          sudo apt-get install --no-install-recommends -y shellcheck util-linux
           find scripts system/overlay system/native/overlay system/native-installer/overlay -type f -exec sh -c '
             for file do
               if head -n 1 "$file" | grep -q "^#!/bin/sh"; then
