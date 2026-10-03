@@ -29,6 +29,8 @@ def targets(workspace, source):
     for name in ['a','b']:
         path = workspace / (name + '.img')
         info = regular(path, True)
+        if info.st_size != 512 * 1024 * 1024:
+            raise ValueError('installer test targets must be exactly 512 MiB')
         key = (info.st_dev, info.st_ino)
         if key in objects:
             raise ValueError('source or duplicate target inode')

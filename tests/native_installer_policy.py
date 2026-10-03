@@ -17,7 +17,9 @@ class InstallerPolicy(unittest.TestCase):
             workspace=Path(directory)
             source=workspace/'source.img';source.write_bytes(b'readonly installer')
             for name in ['a','b']:
-                p=workspace/(name+'.img');p.write_bytes(b'private target');p.chmod(0o600)
+                p=workspace/(name+'.img')
+                with p.open('wb') as stream:stream.truncate(512*1024*1024)
+                p.chmod(0o600)
                 (workspace/(name+'.serial')).write_text('MOOS-N3-TARGET-'+('abcde' if name=='a' else '12345')+'\n')
             self.assertEqual(len(runner.targets(workspace,source)),2)
             argv,fds=runner.pin_bindings(['bwrap','--ro-bind',str(source),'/moos/installer.img','--bind',str(workspace/'a.img'),'/moos/a.img'])
@@ -39,6 +41,7 @@ class InstallerPolicy(unittest.TestCase):
             a.unlink();a.hardlink_to(source)
             with self.assertRaises(ValueError):runner.targets(workspace,source)
             a.unlink();a.write_bytes(b'target');a.chmod(0o600)
+            with a.open('r+b') as stream:stream.truncate(512*1024*1024)
             second=workspace/'alias';second.hardlink_to(a)
             with self.assertRaises(ValueError):runner.targets(workspace,source)
             second.unlink()
@@ -47,6 +50,8 @@ class InstallerPolicy(unittest.TestCase):
             workspace.chmod(0o755)
             with self.assertRaises(ValueError):runner.targets(workspace,source)
             workspace.chmod(0o700)
+            with a.open('r+b') as stream:stream.truncate(1)
+            with self.assertRaises(ValueError):runner.targets(workspace,source)
         with self.assertRaises(ValueError):runner.targets(ROOT,ROOT/'README.md')
 
     def test_build_and_console_boundaries(self):
