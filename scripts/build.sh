@@ -133,18 +133,7 @@ if [ "$current_ref" != "$BUILDROOT_REF" ]; then
     git -C "$BUILDROOT_DIR" checkout --detach "$BUILDROOT_REF"
 fi
 
-for buildroot_patch in "$BUILDROOT_PATCH_DIR"/*.patch; do
-    [ -f "$buildroot_patch" ] || continue
-    if git -C "$BUILDROOT_DIR" apply --reverse --check "$buildroot_patch" \
-        >/dev/null 2>&1; then
-        continue
-    fi
-    git -C "$BUILDROOT_DIR" apply --check "$buildroot_patch" || {
-        echo "error: Buildroot patch cannot be applied: $buildroot_patch" >&2
-        exit 1
-    }
-    git -C "$BUILDROOT_DIR" apply "$buildroot_patch"
-done
+"$SCRIPT_DIR/prepare-buildroot-tree.sh" "$BUILDROOT_DIR" "$BUILDROOT_PATCH_DIR"
 
 mkdir -p "$HOST_TOOLS_DIR" "$OUTPUT_DIR"
 
