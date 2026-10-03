@@ -1104,6 +1104,7 @@ impl Installer {
         boot_result?;
         self.guard(&guarded_target)?;
         let bios_hashes = self.embed_bios(plan, &guarded_target, &disk)?;
+        guarded_target = self.snapshot_layout(&guarded_target, &plan.layout)?;
         if plan.mode == Mode::Fresh {
             phase("INITIALIZING_DATA");
             self.guard(&guarded_target)?;
@@ -1239,6 +1240,7 @@ impl Installer {
         tool("/bin/umount", &["/run/moos-installer/boot"], b"")?;
         verified?;
         Payload::verify(&self.payload_dir)?;
+        self.guard(&guarded_target)?;
         phase("COMPLETE");
         Ok(())
     }
