@@ -2,10 +2,7 @@ name: Native security policy
 
 on:
   push:
-    branches: ['**']
-    paths: ['native/**', 'configs/**', 'scripts/**', 'system/native/**', 'system/native-installer/**', 'patches/**', 'tests/native_*', 'rules.md', 'docs/native/**', '.github/workflows/**']
   pull_request:
-    paths: ['native/**', 'configs/**', 'scripts/**', 'system/native/**', 'system/native-installer/**', 'patches/**', 'tests/native_*', 'rules.md', 'docs/native/**', '.github/workflows/**']
   workflow_dispatch:
 
 permissions:
@@ -18,6 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
       - name: Install policy tools
         run: |
@@ -40,8 +38,19 @@ jobs:
           python3 tests/workflow_security.py
           python3 tests/docs_links.py
       - name: Shell and repository integrity checks
+        env:
+          PUSH_BEFORE: ${{ github.event.before }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           sh -n scripts/build.sh scripts/prepare-buildroot-tree.sh scripts/native-installer-post-build.sh scripts/native-installer-post-image.sh
           shellcheck --severity=warning --exclude=SC1007 scripts/build.sh scripts/prepare-buildroot-tree.sh scripts/native-installer-post-build.sh scripts/native-installer-post-image.sh
-          git diff --check
+          if [ -n "${GITHUB_BASE_REF:-}" ]; then
+            git diff --check "origin/$GITHUB_BASE_REF...HEAD"
+          elif [ -n "${PUSH_BEFORE:-}" ] && [ "$PUSH_BEFORE" != '0000000000000000000000000000000000000000' ]; then
+            git diff --check "$PUSH_BEFORE..$GITHUB_SHA"
+          elif [ -n "${PUSH_BEFORE:-}" ] && [ "$PUSH_BEFORE" = '0000000000000000000000000000000000000000' ] && [ "${GITHUB_REF_NAME:-}" != "${DEFAULT_BRANCH:-}" ] && git show-ref --verify --quiet "refs/remotes/origin/$DEFAULT_BRANCH"; then
+            git diff --check "origin/$DEFAULT_BRANCH...$GITHUB_SHA"
+          else
+            git diff --check "$(git hash-object -t tree /dev/null)..$GITHUB_SHA"
+          fi
           test -z "$(git ls-files | grep -Ei '(^|/)(id_rsa|id_ed25519|.*\.p12|.*\.pfx|.*\.key)$' || true)"

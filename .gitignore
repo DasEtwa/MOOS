@@ -19,6 +19,7 @@
 *.a
 *.so
 *.so.*
+*.pyc
 /target/
 /staging/
 /sysroot/
@@ -59,6 +60,7 @@ venv/
 *.pem
 *.key
 *.p12
+*.pfx
 *.mobileprovision
 *.provisionprofile
 secrets/
