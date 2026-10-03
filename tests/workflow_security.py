@@ -27,6 +27,24 @@ class WorkflowSecurity(unittest.TestCase):
             self.assertNotIn('pull_request_target:', text, workflow)
             self.assertNotIn('secrets.', text, workflow)
 
+    def test_installer_build_changes_trigger_dynamic_gates(self):
+        for name in [
+            'native-installer-e2e.yml',
+            'native-installer-adversarial.yml',
+            'native-cross-host.yml',
+        ]:
+            text = (ROOT / '.github/workflows' / name).read_text()
+            self.assertIn("'scripts/build.sh'", text, name)
+            self.assertIn("'scripts/prepare-buildroot-tree.sh'", text, name)
+
+    def test_both_base_installs_exist_before_multidisk_acceptance(self):
+        text = (ROOT / '.github/workflows/native-installer-e2e.yml').read_text()
+        bios_install = text.index('native_installer.py --boot bios')
+        uefi_install = text.index('native_installer.py --boot uefi')
+        first_multidisk = text.index('native_installer_multidisk.py')
+        self.assertLess(bios_install, first_multidisk)
+        self.assertLess(uefi_install, first_multidisk)
+
 
 if __name__ == '__main__':
     unittest.main()

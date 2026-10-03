@@ -2,7 +2,7 @@ name: Native cross host
 
 on:
   pull_request:
-    paths: ['Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'native/installer/**', 'scripts/run-native-*', 'tests/native_*', '.github/workflows/native-cross-host.yml']
+    paths: ['Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'native/installer/**', 'scripts/build.sh', 'scripts/prepare-buildroot-tree.sh', 'scripts/run-native-*', 'tests/native_*', '.github/workflows/native-cross-host.yml']
   workflow_dispatch:
 
 permissions:

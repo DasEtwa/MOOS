@@ -2,7 +2,7 @@ name: Native installer end to end
 
 on:
   pull_request:
-    paths: ['native/installer/**', 'configs/**', 'scripts/native-*', 'scripts/run-native-*', 'system/native/**', 'system/native-installer/**', 'patches/**', 'tests/native_*', '.github/workflows/native-installer-e2e.yml']
+    paths: ['native/installer/**', 'configs/**', 'scripts/build.sh', 'scripts/prepare-buildroot-tree.sh', 'scripts/native-*', 'scripts/run-native-*', 'system/native/**', 'system/native-installer/**', 'patches/**', 'tests/native_*', '.github/workflows/native-installer-e2e.yml']
   workflow_dispatch:
 
 permissions:
@@ -26,13 +26,15 @@ jobs:
         run: ./scripts/build.sh --target native-installer --jobs 4
       - name: Inspect generated media
         run: python3 tests/native_installer_media.py
-      - name: BIOS install, boot, preserve, multidisk, and clone rejection
+      - name: Create and boot independent BIOS and UEFI installs
         run: |
           python3 tests/native_installer.py --boot bios --qemu /usr/bin/qemu-system-x86_64
+          python3 tests/native_installer.py --boot uefi --qemu /usr/bin/qemu-system-x86_64 --uefi-code /usr/share/OVMF/OVMF_CODE_4M.fd --uefi-vars /usr/share/OVMF/OVMF_VARS_4M.fd
+      - name: Exercise BIOS multidisk and clone rejection
+        run: |
           python3 tests/native_installer_multidisk.py --boot bios --qemu /usr/bin/qemu-system-x86_64
           python3 tests/native_installer_clone_negative.py --boot bios --qemu /usr/bin/qemu-system-x86_64
-      - name: UEFI install, boot, preserve, multidisk, and clone rejection
+      - name: Exercise UEFI multidisk and clone rejection
         run: |
-          python3 tests/native_installer.py --boot uefi --qemu /usr/bin/qemu-system-x86_64 --uefi-code /usr/share/OVMF/OVMF_CODE_4M.fd --uefi-vars /usr/share/OVMF/OVMF_VARS_4M.fd
           python3 tests/native_installer_multidisk.py --boot uefi --qemu /usr/bin/qemu-system-x86_64 --uefi-code /usr/share/OVMF/OVMF_CODE_4M.fd --uefi-vars /usr/share/OVMF/OVMF_VARS_4M.fd
           python3 tests/native_installer_clone_negative.py --boot uefi --qemu /usr/bin/qemu-system-x86_64 --uefi-code /usr/share/OVMF/OVMF_CODE_4M.fd --uefi-vars /usr/share/OVMF/OVMF_VARS_4M.fd
