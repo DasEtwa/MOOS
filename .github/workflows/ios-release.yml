@@ -94,7 +94,7 @@ jobs:
         run: echo "url=${PAGES_BASE_URL%/}/ios/source.json" >> "$GITHUB_OUTPUT"
 
       - name: Download canonical unsigned IPA
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: MOOS-unsigned-iphoneos-arm64
           path: ${{ runner.temp }}/device-artifact
@@ -255,7 +255,7 @@ jobs:
           fi
 
       - name: Download validated release payload
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: MOOS-iOS-release-payload
           path: ${{ runner.temp }}/release-payload
